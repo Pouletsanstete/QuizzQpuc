@@ -486,7 +486,7 @@ fun EcranQuiz(
             Text("Question ${index + 1} / $total", fontWeight = FontWeight.Bold)
             TextButton(onClick = onAbandon) { Text("Abandon") }
         }
-        LinearProgressIndicator(value = (index + 1f) / total, Modifier.fillMaxWidth())
+                LinearProgressIndicator(progress = { (index + 1f) / total }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(20.dp))
 
         Card(
