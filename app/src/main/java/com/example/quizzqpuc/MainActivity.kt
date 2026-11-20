@@ -607,7 +607,7 @@ fun CarteFrance(deptATrouver: Departement, verrouille: Boolean, onTouche: (Boole
             .forEach { d ->
                 Box(
                     Modifier
-                        .offset(x = (d.mapX * 0.92f) * w, y = (0.10f + d.mapY * 0.72f) * h)
+                                                .offset(x = w * (d.mapX * 0.92f), y = h * (0.10f + d.mapY * 0.72f))
                         .size(width = 14.dp, height = 14.dp)
                         .background(
                             if (d.numero == deptATrouver.numero) Color(0xFF1565C0)
