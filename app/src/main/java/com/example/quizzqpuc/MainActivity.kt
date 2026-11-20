@@ -361,6 +361,7 @@ fun bonneReponse(q: Question): String = when (q.mode) {
 }
 
 fun evalueReponse(q: Question, reponse: String): Boolean = when (q.mode) {
+    Mode.LOCALISATION -> true
     Mode.NOM -> correctFlechie(reponse, listOf(q.dept.nom))
     Mode.NUMERO -> normaliser(reponse) == normaliser(q.dept.numero)
     Mode.REGION -> correctFlechie(reponse, listOf(REGION_Noms[q.dept.region] ?: q.dept.region, q.dept.region))
