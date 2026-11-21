@@ -1,22 +1,18 @@
 // ============================================================================
-// QUIZZ QPUC - Thème : Départements français
+// QUIZZ QPUC v2 - Thème : Départements français
 // ============================================================================
-// Appli Android complète en UN SEUL fichier (MainActivity.kt), en Kotlin +
-// Jetpack Compose. À coller dans un projet Android sur un service en ligne
-// (Replit, Gitpod...) pour générer l'APK sans ordinateur.
+// Nouveautés v2 :
+//  - Menu général (Jouer / Fiches) puis liste des quiz (extensible :
+//    Départements actif ; Rois de France, États américains... à venir)
+//  - Questions sous forme de FICHE A TROUS : la fiche complète est affichée,
+//    seuls les champs choisis dans les options sont vides et à remplir
+//  - Carte : zones de régions colorées et nommées en fond, départements
+//    invisibles avant la réponse, zoom/pan à deux doigts (pincer/écarter)
+//  - Support des images (drapeaux...) par URL dans fiches et questions
+//    (mécanisme prêt ; champs vides pour l'instant, utile pour les
+//    prochaines catégories type États américains)
 //
-// Fonctions :
-//  - Thème : Culture générale > Départements français (extensible)
-//  - Choix des modes : nom, numéro, localisation (carte schématique
-//    cliquable), région, gentilé, habitants (±5%), superficie (±10%),
-//    chef-lieu, sous-préfectures
-//  - Réponse LIBRE avec correction souple (casse, accents, 1-2 fautes)
-//  - Slider du nombre de questions (5 à 50, par pas de 5)
-//  - Fiches de révision par département + résultats détaillés
-//
-// NOTE : population / superficie / sous-préfectures sont approximatives
-// (INSEE ~2021). À vérifier et corriger dans DEPARTEMENTS avant une
-// préparation QPUC sérieuse.
+// À vérifier toujours : données approximatives (INSEE ~2021).
 // ============================================================================
 
 package com.example.quizzqpuc
@@ -28,30 +24,37 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 import kotlin.random.Random
 
 // ----------------------------------------------------------------------------
 // DONNÉES : 101 départements
-// Numéro, Nom, Région, Chef-lieu, Gentilé, Habitants (milliers),
-// Superficie (km²), Sous-préfectures, position carte (mapX, mapY en 0..1)
 // ----------------------------------------------------------------------------
 
 data class Departement(
@@ -60,11 +63,12 @@ data class Departement(
     val region: String,
     val chefLieu: String,
     val gentile: String,
-    val populationK: Int,   // en milliers d'habitants
+    val populationK: Int,
     val superficieKm2: Int,
     val sousPrefs: List<String>,
-    val mapX: Float,        // 0.0 = ouest, 1.0 = est (métropole)
-    val mapY: Float         // 0.0 = nord, 1.0 = sud (métropole)
+    val mapX: Float,
+    val mapY: Float,
+    val imageUrl: String? = null   // drapeau / illustration (v2 : prêt)
 )
 
 val REGION_Noms = mapOf(
@@ -81,7 +85,24 @@ val REGION_Noms = mapOf(
     "BFC" to "Bourgogne-Franche-Comté",
     "IDF" to "Île-de-France",
     "COR" to "Corse",
-    "DOM" to "Département d'outre-mer"
+    "DOM" to "Outre-mer"
+)
+
+val REGION_Couleurs = mapOf(
+    "ARA" to Color(0xFFDCEDC8),
+    "GE" to Color(0xFFFFF9C4),
+    "HDF" to Color(0xFFFFE0B2),
+    "NA" to Color(0xFFE1BEE7),
+    "OCC" to Color(0xFFFFCCBC),
+    "PACA" to Color(0xFFB2EBF2),
+    "PDL" to Color(0xFFC8E6C9),
+    "NOR" to Color(0xFFD1C4E9),
+    "BRE" to Color(0xFFB3E5FC),
+    "CVL" to Color(0xFFFFF59D),
+    "BFC" to Color(0xFFFFCDD2),
+    "IDF" to Color(0xFFCFD8DC),
+    "COR" to Color(0xFFB2DFDB),
+    "DOM" to Color(0xFFF5F5F5)
 )
 
 val DEPARTEMENTS = listOf(
@@ -189,7 +210,7 @@ val DEPARTEMENTS = listOf(
 )
 
 // ----------------------------------------------------------------------------
-// CORRECTION SOUPLE (mode QPUC) : normalisation + distance de Levenshtein
+// CORRECTION SOUPLE
 // ----------------------------------------------------------------------------
 
 fun normaliser(s: String): String = s
@@ -207,9 +228,9 @@ fun levenshtein(a: String, b: String): Int {
         n[0] = i
         for (j in 1..b.length) {
             n[j] = minOf(
-                m[j] + 1,                                       // suppression
-                n[j - 1] + 1,                                   // insertion
-                m[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1   // substitution
+                m[j] + 1,
+                n[j - 1] + 1,
+                m[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1
             )
         }
         val tmp = m; m = n; n = tmp
@@ -217,7 +238,6 @@ fun levenshtein(a: String, b: String): Int {
     return m[b.length]
 }
 
-// Tolérance : distance faible selon la longueur, ou inclusion des mots
 fun correspond(reponse: String, attendu: String): Boolean {
     val r = normaliser(reponse)
     val a = normaliser(attendu)
@@ -235,28 +255,42 @@ fun correspond(reponse: String, attendu: String): Boolean {
 fun correctFlechie(reponse: String, candidats: List<String>) =
     candidats.any { correspond(reponse, it) }
 
-// ----------------------------------------------------------------------------
-// MODES DE QUESTION
+    // ----------------------------------------------------------------------------
+// MODES ET NAVIGATION
 // ----------------------------------------------------------------------------
 
-enum class Mode(val label: String) {
-    NOM("Le nom (n° -> nom)"),
-    NUMERO("Le numéro (nom -> n°)"),
-    LOCALISATION("Emplacement sur la carte"),
-    REGION("La région"),
-    GENTILE("Le gentilé"),
-    HABITANTS("Nb d'habitants (±5%)"),
-    SUPERFICIE("Superficie (±10%)"),
-    CHEF_LIEU("Le chef-lieu"),
-    SOUS_PREF("Sous-préfectures")
+enum class Mode(val label: String, val libelleChamp: String) {
+    NOM("Le nom (n° -> nom)", "Nom du département"),
+    NUMERO("Le numéro (nom -> n°)", "Numéro"),
+    REGION("La région", "Région"),
+    GENTILE("Le gentilé", "Gentilé (les ...)"),
+    HABITANTS("Nb d'habitants (±5%)", "Habitants (ex : 500000)"),
+    SUPERFICIE("Superficie (±10%)", "Superficie km²"),
+    CHEF_LIEU("Le chef-lieu", "Chef-lieu"),
+    SOUS_PREF("Sous-préfectures", "Une sous-préfecture")
 }
 
-enum class Ecran { ACCUEIL, QUIZ, RESULTATS, FICHES }
+enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES }
 
-data class Question(val mode: Mode, val dept: Departement)
+data class Question(
+    val dept: Departement,
+    val carte: Boolean,                    // question de localisation
+    val champs: List<Mode> = emptyList()   // champs à remplir (fiche à trous)
+)
+
+// Catégories de quiz : pour en ajouter une, ajouter une ligne ici + son
+// écran de paramètres dans le `when (categorie.id)` de QuizzQpucApp.
+data class Categorie(val id: String, val titre: String, val dispo: Boolean)
+
+val CATEGORIES = listOf(
+    Categorie("departements", "Départements français", true),
+    Categorie("rois", "Rois de France", false),
+    Categorie("usa", "États américains", false),
+    Categorie("capitales", "Capitales du monde", false)
+)
 
 // ----------------------------------------------------------------------------
-// ACTIVITÉ PRINCIPALE
+// ACTIVITÉ + NAVIGATION
 // ----------------------------------------------------------------------------
 
 class MainActivity : ComponentActivity() {
@@ -268,13 +302,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun QuizzQpucApp() {
-    var ecran by remember { mutableStateOf(Ecran.ACCUEIL) }
+    var ecran by remember { mutableStateOf(Ecran.MENU) }
+    var categorie by remember { mutableStateOf(CATEGORIES[0]) }
 
-    // Options choisies à l'accueil
+    // Options
     var nbQuestions by remember { mutableStateOf(20f) }
     var modesActifs by remember { mutableStateOf(Mode.entries.toList()) }
 
-    // État du quiz en cours
+    // État du quiz
     var questions by remember { mutableStateOf(listOf<Question>()) }
     var index by remember { mutableStateOf(0) }
     var reponses by remember { mutableStateOf(listOf<Boolean>()) }
@@ -289,14 +324,26 @@ fun QuizzQpucApp() {
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
             when (ecran) {
-                Ecran.ACCUEIL -> EcranAccueil(
-                    nbQuestions,
-                    { nbQuestions = it },
-                    modesActifs,
-                    { modesActifs = it },
-                    onDemarrer = { demarrer() },
+                Ecran.MENU -> EcranMenu(
+                    onJouer = { ecran = Ecran.LISTE_QUIZ },
                     onFiches = { ecran = Ecran.FICHES }
                 )
+                Ecran.LISTE_QUIZ -> EcranListeQuiz(
+                    onRetour = { ecran = Ecran.MENU },
+                    onChoix = { c ->
+                        categorie = c
+                        if (c.dispo) ecran = Ecran.PARAMS
+                    }
+                )
+                Ecran.PARAMS -> when (categorie.id) {
+                    "departements" -> EcranParamsDepartements(
+                        nbQuestions,
+                        { nbQuestions = it },
+                        modesActifs,
+                        { modesActifs = it },
+                        onDemarrer = { demarrer() }
+                    )
+                }
                 Ecran.QUIZ -> EcranQuiz(
                     question = questions[index],
                     total = questions.size,
@@ -305,121 +352,113 @@ fun QuizzQpucApp() {
                         reponses = reponses + correct
                         if (index + 1 < questions.size) index++ else ecran = Ecran.RESULTATS
                     },
-                    onAbandon = { ecran = Ecran.ACCUEIL }
+                    onAbandon = { ecran = Ecran.LISTE_QUIZ }
                 )
                 Ecran.RESULTATS -> EcranResultats(
                     questions, reponses,
                     onRef = { demarrer() },
-                    onAccueil = { ecran = Ecran.ACCUEIL }
+                    onMenu = { ecran = Ecran.LISTE_QUIZ }
                 )
-                Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.ACCUEIL })
+                Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.MENU })
             }
         }
     }
 }
 
 // ----------------------------------------------------------------------------
-// GÉNÉRATION DES QUESTIONS
+// MENU GÉNÉRAL
+// ----------------------------------------------------------------------------
+
+@Composable
+fun EcranMenu(onJouer: () -> Unit, onFiches: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Quizz QPUC", fontSize = 36.sp, fontWeight = FontWeight.Bold)
+        Text("Entraînement aux quiz de culture générale", fontSize = 15.sp, color = Color.Gray)
+        Spacer(Modifier.height(48.dp))
+        Button(onClick = onJouer, Modifier.fillMaxWidth().height(64.dp)) {
+            Text("Jouer", fontSize = 22.sp)
+        }
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(onClick = onFiches, Modifier.fillMaxWidth().height(64.dp)) {
+            Text("Fiches", fontSize = 22.sp)
+        }
+    }
+}
+
+@Composable
+fun EcranListeQuiz(onRetour: () -> Unit, onChoix: (Categorie) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onRetour) { Text("← Menu") }
+            Text("Choisis un quiz", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(12.dp))
+        CATEGORIES.forEach { c ->
+            Button(
+                onClick = { onChoix(c) },
+                enabled = c.dispo,
+                Modifier.fillMaxWidth().height(60.dp).padding(vertical = 4.dp)
+            ) {
+                Text(if (c.dispo) c.titre else "${c.titre} (à venir...)", fontSize = 18.sp)
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// PARAMÈTRES DU QUIZ DÉPARTEMENTS
 // ----------------------------------------------------------------------------
 
 fun genererQuestions(nb: Int, modes: List<Mode>): List<Question> {
     val liste = mutableListOf<Question>()
     repeat(nb) { i ->
-        val mode = modes[i % modes.size]
         val dept = DEPARTEMENTS[Random.nextInt(DEPARTEMENTS.size)]
-        liste.add(Question(mode, dept))
+        val champs = modes.filter { it != Mode.LOCALISATION }
+        val carte = Mode.LOCALISATION in modes && (champs.isEmpty() || i % 5 == 0)
+        liste.add(
+            if (carte) Question(dept, true, emptyList())
+            else Question(dept, false, champs)
+        )
     }
     return liste
 }
 
-// ----------------------------------------------------------------------------
-// ÉNONCÉS, BONNES RÉPONSES ET ÉVALUATION
-// ----------------------------------------------------------------------------
-
-fun enonce(q: Question): String = when (q.mode) {
-    Mode.NOM -> "Quel est le nom du département n° ${q.dept.numero} ?"
-    Mode.NUMERO -> "Quel est le numéro du département ${q.dept.nom} ?"
-    Mode.LOCALISATION -> "Où se trouve ${q.dept.nom} ? Touche sa zone sur la carte."
-    Mode.REGION -> "Dans quelle région se trouve ${q.dept.nom} (${q.dept.numero}) ?"
-    Mode.GENTILE -> "Comment appelle-t-on les habitants de ${q.dept.nom} (${q.dept.numero}) ?"
-    Mode.HABITANTS -> "Combien d'habitants dans ${q.dept.nom} (${q.dept.numero}) ? (±5%)"
-    Mode.SUPERFICIE -> "Quelle est la superficie de ${q.dept.nom} (${q.dept.numero}) ? (±10%)"
-    Mode.CHEF_LIEU -> "Quel est le chef-lieu de ${q.dept.nom} (${q.dept.numero}) ?"
-    Mode.SOUS_PREF -> "Cite UNE sous-préfecture de ${q.dept.nom} (${q.dept.numero}) :"
-}
-
-fun bonneReponse(q: Question): String = when (q.mode) {
-    Mode.NOM -> q.dept.nom
-    Mode.NUMERO -> q.dept.numero
-    Mode.LOCALISATION -> "${q.dept.numero} - ${q.dept.nom}"
-    Mode.REGION -> REGION_Noms[q.dept.region] ?: q.dept.region
-    Mode.GENTILE -> "Les ${q.dept.gentile}"
-    Mode.HABITANTS -> "Environ ${q.dept.populationK * 1000} habitants"
-    Mode.SUPERFICIE -> "Environ ${q.dept.superficieKm2} km²"
-    Mode.CHEF_LIEU -> q.dept.chefLieu
-    Mode.SOUS_PREF -> q.dept.sousPrefs.joinToString(", ")
-}
-
-fun evalueReponse(q: Question, reponse: String): Boolean = when (q.mode) {
-    Mode.LOCALISATION -> true
-    Mode.NOM -> correctFlechie(reponse, listOf(q.dept.nom))
-    Mode.NUMERO -> normaliser(reponse) == normaliser(q.dept.numero)
-    Mode.REGION -> correctFlechie(reponse, listOf(REGION_Noms[q.dept.region] ?: q.dept.region, q.dept.region))
-    Mode.GENTILE -> correctFlechie(reponse, listOf(q.dept.gentile))
-    Mode.HABITANTS -> {
-        val v = reponse.filter { it.isDigit() }.toIntOrNull() ?: 0
-        val cible = q.dept.populationK * 1000
-        v > 0 && abs(v - cible) <= cible * 0.05
-    }
-    Mode.SUPERFICIE -> {
-        val v = reponse.filter { it.isDigit() }.toIntOrNull() ?: 0
-        val cible = q.dept.superficieKm2
-        v > 0 && abs(v - cible) <= cible * 0.10
-    }
-    Mode.CHEF_LIEU -> correctFlechie(reponse, listOf(q.dept.chefLieu))
-    Mode.SOUS_PREF -> q.dept.sousPrefs.isNotEmpty() && correctFlechie(reponse, q.dept.sousPrefs)
-}
-
-// ----------------------------------------------------------------------------
-// ÉCRAN D'ACCUEIL (thème, modes, slider)
-// ----------------------------------------------------------------------------
-
 @Composable
-fun EcranAccueil(
+fun EcranParamsDepartements(
     nbQuestions: Float,
     onNbQuestions: (Float) -> Unit,
     modesActifs: List<Mode>,
     onModesActifs: (List<Mode>) -> Unit,
-    onDemarrer: () -> Unit,
-    onFiches: () -> Unit
+    onDemarrer: () -> Unit
 ) {
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(24.dp)
     ) {
-        Spacer(Modifier.height(16.dp))
-        Text("Quizz QPUC", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-        Text("Thème : Départements français", fontSize = 16.sp, color = Color.Gray)
-        Spacer(Modifier.height(24.dp))
-
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.padding(20.dp)) {
                 Text("Nombre de questions", fontWeight = FontWeight.Bold)
-                Text("${nbQuestions.toInt()} questions", fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
+                Text("${nbQuestions.toInt()} questions", fontSize = 26.sp, fontWeight = FontWeight.Bold)
                 Slider(
                     value = nbQuestions,
                     onValueChange = { onNbQuestions((it / 5f).toInt() * 5f) },
                     valueRange = 5f..50f,
-                    steps = 9   // pas de 5 : 5, 10, 15, 20, 25, 30, 35, 40, 45, 50
+                    steps = 9
                 )
             }
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Ce qu'il faut savoir", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
+        Text("Champs à remplir dans la fiche", fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
         Mode.entries.forEach { mode ->
             val actif = mode in modesActifs
@@ -452,17 +491,93 @@ fun EcranAccueil(
 
         Spacer(Modifier.height(24.dp))
         Button(onClick = onDemarrer, Modifier.fillMaxWidth().height(56.dp)) {
-            Text("Commencer le quiz", fontSize = 18.sp)
-        }
-        OutlinedButton(onClick = onFiches, Modifier.fillMaxWidth().height(56.dp)) {
-            Text("Revoir les fiches", fontSize = 18.sp)
+            Text("Commencer", fontSize = 18.sp)
         }
         Spacer(Modifier.height(24.dp))
     }
 }
 
 // ----------------------------------------------------------------------------
-// ÉCRAN QUIZ
+// FICHE RÉUTILISABLE (questions ET révisions)
+// ----------------------------------------------------------------------------
+
+@Composable
+fun ChampRempli(
+    libelle: String,
+    valeur: String,
+    onSaisie: (String) -> Unit,
+    verrouille: Boolean,
+    verdict: Boolean? = null
+) {
+    val couleurBordure = when (verdict) {
+        true -> Color(0xFF2E7D32)
+        false -> Color(0xFFC62828)
+        null -> MaterialTheme.colorScheme.outline
+    }
+    TextField(
+        value = valeur,
+        onValueChange = { if (!verrouille) onSaisie(it) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        label = { Text(libelle, fontSize = 13.sp) },
+        singleLine = true,
+        enabled = !verrouille,
+        isError = verdict == false,
+        supportingText = {
+            when (verdict) {
+                true -> Text("Juste !", color = Color(0xFF2E7D32), fontSize = 12.sp)
+                false -> Text("Faux", color = Color(0xFFC62828), fontSize = 12.sp)
+                null -> {}
+            }
+        }
+    )
+}
+
+@Composable
+fun LigneFiche(libelle: String, valeur: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+    ) {
+        Text(libelle, fontSize = 14.sp, color = Color.Gray, modifier = Modifier.width(130.dp))
+        Text(valeur, fontSize = 15.sp)
+    }
+}
+
+fun valeurFiche(d: Departement, mode: Mode): String = when (mode) {
+    Mode.NOM -> d.nom
+    Mode.NUMERO -> d.numero
+    Mode.REGION -> REGION_Noms[d.region] ?: d.region
+    Mode.GENTILE -> d.gentile
+    Mode.HABITANTS -> (d.populationK * 1000).toString()
+    Mode.SUPERFICIE -> d.superficieKm2.toString()
+    Mode.CHEF_LIEU -> d.chefLieu
+    Mode.SOUS_PREF -> d.sousPrefs.firstOrNull() ?: ""
+}
+
+fun champJuste(mode: Mode, d: Departement, reponse: String): Boolean = when (mode) {
+    Mode.NOM -> correctFlechie(reponse, listOf(d.nom))
+    Mode.NUMERO -> normaliser(reponse) == normaliser(d.numero)
+    Mode.REGION -> correctFlechie(reponse, listOf(REGION_Noms[d.region] ?: d.region))
+    Mode.GENTILE -> correctFlechie(reponse, listOf(d.gentile))
+    Mode.HABITANTS -> {
+        val v = reponse.filter { it.isDigit() }.toIntOrNull() ?: 0
+        val cible = d.populationK * 1000
+        v > 0 && abs(v - cible) <= cible * 0.05
+    }
+    Mode.SUPERFICIE -> {
+        val v = reponse.filter { it.isDigit() }.toIntOrNull() ?: 0
+        val cible = d.superficieKm2
+        v > 0 && abs(v - cible) <= cible * 0.10
+    }
+    Mode.CHEF_LIEU -> correctFlechie(reponse, listOf(d.chefLieu))
+    Mode.SOUS_PREF -> d.sousPrefs.isNotEmpty() && correctFlechie(reponse, d.sousPrefs)
+}
+
+// ----------------------------------------------------------------------------
+// ÉCRAN QUIZ : fiche à trous (ou carte pour la localisation)
 // ----------------------------------------------------------------------------
 
 @Composable
@@ -473,155 +588,267 @@ fun EcranQuiz(
     onRepondu: (Boolean) -> Unit,
     onAbandon: () -> Unit
 ) {
-    var reponse by remember(question) { mutableStateOf("") }
-    var verdict by remember(question) { mutableStateOf<Boolean?>(null) }
+    var saisies by remember(question) {
+        mutableStateOf(question.champs.associateWith { "" } as MutableMap<Mode, String>)
+    }
+    var verdicts by remember(question) { mutableStateOf<Map<Mode, Boolean>>(emptyMap()) }
+    var verdictCarte by remember(question) { mutableStateOf<Boolean?>(null) }
+    var correct by remember(question) { mutableStateOf(false) }
+    val aValider = verdicts.isNotEmpty() || verdictCarte != null
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Question ${index + 1} / $total", fontWeight = FontWeight.Bold)
             TextButton(onClick = onAbandon) { Text("Abandon") }
         }
-                LinearProgressIndicator(progress = { (index + 1f) / total }, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(20.dp))
+        LinearProgressIndicator(
+            progress = { (index + 1f) / total },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
 
-        Card(
-            Modifier
-                .fillMaxWidth()
-                .border(4.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text(enonce(question), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        LazyColumn(Modifier.weight(1f)) {
+            item {
+                Card(
+                    Modifier
+                        .fillMaxWidth()
+                        .border(4.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        if (question.carte) {
+                            Text(
+                                "Où se trouve ${question.dept.nom} ? Pince pour zoomer, puis touche sa zone.",
+                                fontSize = 18.sp, fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            CarteFranceLocked(
+                                deptRevele = if (verdictCarte != null) question.dept else null,
+                                onTapDept = { d -> if (verdictCarte == null) verdictCarte = (d.numero == question.dept.numero) }
+                            )
+                        } else {
+                            Text("Complète la fiche", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                            if (question.dept.imageUrl != null) {
+                                ImageUrl(question.dept.imageUrl, "Illustration")
+                            }
+                            // Fiche complète : champs demandés = zones de saisie,
+                            // les autres sont affichés en clair
+                            val tous = listOf(
+                                Mode.NUMERO, Mode.NOM, Mode.REGION, Mode.GENTILE,
+                                Mode.HABITANTS, Mode.SUPERFICIE, Mode.CHEF_LIEU, Mode.SOUS_PREF
+                            )
+                            tous.forEach { mode ->
+                                if (mode in question.champs) {
+                                    ChampRempli(
+                                        libelle = mode.libelleChamp,
+                                        valeur = saisies[mode] ?: "",
+                                        onSaisie = { nvx ->
+                                            saisies = saisies.toMutableMap().apply { put(mode, nvx) }
+                                        },
+                                        verrouille = verdicts.isNotEmpty(),
+                                        verdict = verdicts[mode]
+                                    )
+                                    if (verdicts[mode] == false) {
+                                        Text(
+                                            "Attendu : ${valeurFiche(question.dept, mode)}",
+                                            fontSize = 13.sp,
+                                            color = Color(0xFFC62828),
+                                            modifier = Modifier.padding(start = 16.dp)
+                                        )
+                                    }
+                                } else {
+                                    LigneFiche(mode.libelleChamp, valeurFiche(question.dept, mode))
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(20.dp))
 
-        // Carte interactive uniquement pour la localisation
-        if (question.mode == Mode.LOCALISATION) {
-            CarteFrance(deptATrouver = question.dept, verrouille = verdict != null, onTouche = { verdict = it })
-        } else {
-            TextField(
-                value = reponse,
-                onValueChange = { reponse = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Ta réponse") },
-                singleLine = true,
-                enabled = verdict == null
-            )
-        }
+        Spacer(Modifier.height(10.dp))
 
-        Spacer(Modifier.height(16.dp))
-
-        when (verdict) {
-            null -> {
-                if (question.mode != Mode.LOCALISATION) {
-                    Button(
-                        onClick = { verdict = evalueReponse(question, reponse) },
-                        Modifier.fillMaxWidth().height(52.dp),
-                        enabled = reponse.isNotBlank()
-                    ) { Text("Valider", fontSize = 18.sp) }
+        when {
+            !aValider -> {
+                Button(
+                    onClick = {
+                        if (question.carte) {
+                            verdictCarte?.let {
+                                correct = it
+                            }
+                        } else {
+                            val nouveaux = question.champs.associateWith {
+                                champJuste(it, question.dept, saisies[it] ?: "")
+                            }
+                            verdicts = nouveaux
+                            correct = nouveaux.values.all { it }
+                        }
+                    },
+                    Modifier.fillMaxWidth().height(54.dp),
+                    enabled = if (question.carte) verdictCarte != null
+                    else question.champs.all { (saisies[it] ?: "").isNotBlank() }
+                ) {
+                    Text(if (question.carte && verdictCarte == null) "Touche la carte pour répondre" else "Valider", fontSize = 18.sp)
                 }
+            }
+            index + 1 < total -> {
+                val ok = if (question.carte) verdictCarte == true else verdicts.values.all { it }
+                Text(
+                    if (ok) "Correct !" else "Faux",
+                    fontSize = 24.sp, fontWeight = FontWeight.Bold,
+                    color = if (ok) Color(0xFF2E7D32) else Color(0xFFC62828),
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                Button(
+                    onClick = { onRepondu(correct) },
+                    Modifier.fillMaxWidth().height(54.dp)
+                ) { Text("Suite", fontSize = 18.sp) }
             }
             else -> {
-                val couleur = if (verdict == true) Color(0xFF2E7D32) else Color(0xFFC62828)
-                Text(
-                    if (verdict == true) "Correct !" else "Faux",
-                    fontSize = 26.sp, color = couleur, fontWeight = FontWeight.Bold
-                )
-                Text("Réponse : ${bonneReponse(question)}", fontSize = 17.sp, color = couleur)
-                Spacer(Modifier.height(12.dp))
                 Button(
-                    onClick = { onRepondu(verdict == true) },
-                    Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Text(if (index + 1 < total) "Suite" else "Voir les résultats", fontSize = 18.sp)
-                }
+                    onClick = { onRepondu(correct) },
+                    Modifier.fillMaxWidth().height(54.dp)
+                ) { Text("Voir les résultats", fontSize = 18.sp) }
             }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
     }
 }
 
 // ----------------------------------------------------------------------------
-// CARTE DE FRANCE SCHÉMATIQUE (zones cliquables)
+// CARTE : zones de régions + zoom/pan + départements révélés après réponse
 // ----------------------------------------------------------------------------
-// Chaque département métropolitain est dessiné à sa position approximative
-// (mapX, mapY) sous forme de petite pastille. Le joueur touche l'écran :
-// on prend le département le plus proche du toucher, avec une tolérance
-// (6 % de la carte). Simple mais parfait pour travailler l'emplacement.
+
+// ----------------------------------------------------------------------------
+// CARTE : zones de régions en fond, zoom/pan à deux doigts, départements
+// invisibles puis révélation après réponse
+// ----------------------------------------------------------------------------
 
 @Composable
-fun CarteFrance(deptATrouver: Departement, verrouille: Boolean, onTouche: (Boolean) -> Unit) {
-    var infoTap by remember { mutableStateOf("Touche la zone où tu penses qu'il se trouve :") }
-    var couleurZone by remember { mutableStateOf(Color(0xFF90A4AE)) }
+fun CarteFranceLocked(
+    deptRevele: Departement?,                // null = pas encore répondu
+    onTapDept: (Departement) -> Unit = {}
+) {
+    var echelle by remember { mutableStateOf(1f) }
+    var decalage by remember { mutableStateOf(Offset.Zero) }
+    var taille by remember { mutableStateOf(IntSize.Zero) }
 
-    BoxWithConstraints(
+    Box(
         Modifier
             .fillMaxWidth()
-            .height(460.dp)
-            .background(Color(0xFFDFF0FF), RoundedCornerShape(12.dp))
-            .border(2.dp, couleurZone, RoundedCornerShape(12.dp))
-            .pointerInput(deptATrouver.numero, verrouille) {
-                if (verrouille) return@pointerInput
+            .height(520.dp)
+            .background(Color(0xFFEAF3FB), RoundedCornerShape(12.dp))
+            .border(2.dp, Color(0xFFB0C4DE), RoundedCornerShape(12.dp))
+            .onSizeChanged { taille = it }
+            // Zoom / pan à deux doigts (comme une carte)
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    echelle = (echelle * zoom).coerceIn(1f, 10f)
+                    val maxDX = (size.width * (echelle - 1f)) / 2f
+                    val maxDY = (size.height * (echelle - 1f)) / 2f
+                    if (echelle > 1f) {
+                        decalage = Offset(
+                            (decalage.x + pan.x).coerceIn(-maxDX, maxDX),
+                            (decalage.y + pan.y).coerceIn(-maxDY, maxDY)
+                        )
+                    } else {
+                        decalage = Offset.Zero
+                    }
+                }
+            }
+            // Tap (un seul doigt, sans bouger) pour répondre
+            .pointerInput(deptRevele) {
                 detectTapGestures { offset ->
-                    val x = offset.x / size.width
-                    val y = offset.y / size.height
-                    // On compare aux positions relatives utilisées pour dessiner
-                    val rx = x / 0.92f
-                    val ry = (y - 0.10f) / 0.72f
+                    if (taille == IntSize.Zero || deptRevele != null) return@detectTapGestures
+                    // Inverse du zoom centré (pivot par défaut = centre)
+                    val px = (offset.x - size.width / 2f - decalage.x) / echelle + size.width / 2f
+                    val py = (offset.y - size.height / 2f - decalage.y) / echelle + size.height / 2f
+                    val rx = px / size.width / 0.92f
+                    val ry = (py / size.height - 0.12f) / 0.70f
                     val metropole = DEPARTEMENTS.filter { it.mapY < 0.96f }
                     val proche = metropole.minByOrNull { d ->
                         val dx = d.mapX - rx; val dy = d.mapY - ry
                         dx * dx + dy * dy
                     }
                     if (proche != null) {
-                        val dist = sqrt((proche.mapX - rx) * (proche.mapX - rx) + (proche.mapY - ry) * (proche.mapY - ry))
-                        if (dist > 0.06f) {
-                            infoTap = "Assez loin d'un département, réessaie..."
-                        } else if (proche.numero == deptATrouver.numero) {
-                            infoTap = "Correct ! Tu as trouvé ${deptATrouver.nom}."
-                            couleurZone = Color(0xFF66BB6A)
-                            onTouche(true)
+                        val dist = sqrt(
+                            (proche.mapX - rx) * (proche.mapX - rx) +
+                                (proche.mapY - ry) * (proche.mapY - ry)
+                        )
+                        // Tolérance qui diminue quand on zoome
+                        if (dist > 0.035f / echelle) {
+                            // tap trop loin : on ignore, l'utilisateur zoome
                         } else {
-                            infoTap = "Faux : tu as touché ${proche.nom} (${proche.numero})."
-                            couleurZone = Color(0xFFEF5350)
-                            onTouche(false)
+                            onTapDept(proche)
                         }
                     }
                 }
             }
-            .padding(6.dp)
+            .graphicsLayer {
+                scaleX = echelle
+                scaleY = echelle
+                translationX = decalage.x
+                translationY = decalage.y
+            }
     ) {
-        Column(Modifier.padding(8.dp)) {
-            Text("FRANCE (carte schématique)", fontSize = 12.sp, color = Color.Gray)
-            Text(infoTap, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-        val w = maxWidth
-        val h = maxHeight
-        DEPARTEMENTS
-            .filter { it.mapY < 0.96f }
-            .forEach { d ->
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val w = maxWidth
+            val h = maxHeight
+            Column(Modifier.padding(6.dp)) {
+                Text("FRANCE - zones de régions", fontSize = 11.sp, color = Color.Gray)
+            }
+            // Zones de régions : rectangle englobant les départements de la région
+            REGION_Couleurs.forEach { (reg, couleur) ->
+                val deps = DEPARTEMENTS.filter { it.region == reg && it.mapY < 0.96f }
+                if (deps.size >= 1) {
+                    val minX = deps.minOf { it.mapX }; val maxX = deps.maxOf { it.mapX }
+                    val minY = deps.minOf { it.mapY }; val maxY = deps.maxOf { it.mapY }
+                    Box(
+                        Modifier
+                            .offset(x = w * (minX * 0.92f - 0.02f), y = h * (0.12f + minY * 0.70f - 0.025f))
+                            .width(w * ((maxX - minX + 0.04f) * 0.92f))
+                            .height(h * ((maxY - minY + 0.05f) * 0.70f) + 24.dp)
+                            .background(couleur.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .border(1.dp, couleur, RoundedCornerShape(10.dp))
+                    ) {
+                        Text(
+                            REGION_Noms[reg] ?: reg,
+                            fontSize = 10.sp,
+                            color = Color(0xFF37474F),
+                            modifier = Modifier.padding(start = 6.dp, top = 2.dp)
+                        )
+                    }
+                }
+            }
+            // Révélation après réponse : pastille verte sur le bon département
+            if (deptRevele != null && deptRevele.mapY < 0.96f) {
                 Box(
                     Modifier
-                                                .offset(x = w * (d.mapX * 0.92f), y = h * (0.10f + d.mapY * 0.72f))
-                        .size(width = 14.dp, height = 14.dp)
-                        .background(
-                            if (d.numero == deptATrouver.numero) Color(0xFF1565C0)
-                            else couleurZone,
-                            RoundedCornerShape(3.dp)
-                        )
+                        .offset(x = w * (deptRevele.mapX * 0.92f) - 9.dp, y = h * (0.12f + deptRevele.mapY * 0.70f) - 9.dp)
+                        .size(18.dp)
+                        .background(Color(0xFF1B5E20), CircleShape)
+                        .border(2.dp, Color.White, CircleShape)
                 )
             }
-        Text(
-            "Outre-mer (971-976) : pas sur cette carte",
-            Modifier.align(Alignment.BottomStart).padding(6.dp),
-            fontSize = 11.sp, color = Color.Gray
-        )
+        }
     }
+}
+
+// ----------------------------------------------------------------------------
+// IMAGE PAR URL (prêt pour les drapeaux des prochaines catégories)
+// ----------------------------------------------------------------------------
+
+@Composable
+fun ImageUrl(url: String, description: String) {
+    // Nécessite la dépendance Coil dans app/build.gradle.kts et la permission
+    // INTERNET dans le manifest. Voir le guide GitHub.
+    coil.compose.AsyncImage(
+        model = url,
+        contentDescription = description,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(120.dp)
+            .padding(vertical = 4.dp)
+    )
 }
 
 // ----------------------------------------------------------------------------
@@ -633,7 +860,7 @@ fun EcranResultats(
     questions: List<Question>,
     reponses: List<Boolean>,
     onRef: () -> Unit,
-    onAccueil: () -> Unit
+    onMenu: () -> Unit
 ) {
     val score = reponses.count { it }
     val pct = if (reponses.isNotEmpty()) score * 100 / reponses.size else 0
@@ -661,9 +888,9 @@ fun EcranResultats(
         Spacer(Modifier.height(24.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = onRef, Modifier.weight(1f)) { Text("Refaire un quiz") }
+            Button(onClick = onRef, Modifier.weight(1f)) { Text("Refaire") }
             Spacer(Modifier.width(12.dp))
-            OutlinedButton(onClick = onAccueil, Modifier.weight(1f)) { Text("Menu") }
+            OutlinedButton(onClick = onMenu, Modifier.weight(1f)) { Text("Menu") }
         }
         Spacer(Modifier.height(20.dp))
 
@@ -674,11 +901,16 @@ fun EcranResultats(
                 Spacer(Modifier.width(8.dp))
                 Column {
                     Text(
-                        "${q.mode.label} - ${q.dept.numero} ${q.dept.nom}",
+                        if (q.carte) "Localisation - ${q.dept.numero} ${q.dept.nom}"
+                        else "${q.dept.numero} ${q.dept.nom}",
                         fontSize = 14.sp, fontWeight = FontWeight.Bold
                     )
                     if (!ok) {
-                        Text("Réponse attendue : ${bonneReponse(q)}", fontSize = 13.sp, color = Color.Gray)
+                        Text(
+                            "Attendu : " + if (q.carte) "${q.dept.numero} - ${q.dept.nom}"
+                            else q.champs.joinToString(" | ") { "${it.libelleChamp} = ${valeurFiche(q.dept, it)}" },
+                            fontSize = 12.sp, color = Color.Gray
+                        )
                     }
                 }
             }
@@ -694,36 +926,59 @@ fun EcranResultats(
 @Composable
 fun EcranFiches(onRetour: () -> Unit) {
     var recherche by remember { mutableStateOf("") }
-    val filtres = DEPARTEMENTS.filter {
-        it.nom.contains(recherche, ignoreCase = true) ||
-            it.numero.contains(recherche) ||
-            (REGION_Noms[it.region]?.contains(recherche, ignoreCase = true) == true)
-    }
+    var deptOuvert by remember { mutableStateOf<Departement?>(null) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onRetour) { Text("← Retour") }
-            Text("Fiches", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+    if (deptOuvert != null) {
+        // Fiche détaillée
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { deptOuvert = null }) { Text("← Fiches") }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    if (deptOuvert!!.imageUrl != null) ImageUrl(deptOuvert!!.imageUrl!!, "Illustration")
+                    Text("${deptOuvert.numero} - ${deptOuvert.nom}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Région : ${REGION_Noms[deptOuvert.region] ?: deptOuvert.region}", fontSize = 15.sp)
+                    Text("Chef-lieu : ${deptOuvert.chefLieu}", fontSize = 15.sp)
+                    Text("Gentilé : les ${deptOuvert.gentile}", fontSize = 15.sp)
+                    Text("Population : environ ${deptOuvert.populationK * 1000} hab.", fontSize = 15.sp)
+                    Text("Superficie : ${deptOuvert.superficieKm2} km²", fontSize = 15.sp)
+                    if (deptOuvert.sousPrefs.isNotEmpty())
+                        Text("Sous-préfectures : ${deptOuvert.sousPrefs.joinToString(", ")}", fontSize = 15.sp)
+                }
+            }
         }
-        TextField(
-            value = recherche,
-            onValueChange = { recherche = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Rechercher (nom, numéro, région)") },
-            singleLine = true
-        )
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(filtres) { d ->
-                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("${d.numero} - ${d.nom}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Région : ${REGION_Noms[d.region] ?: d.region}", fontSize = 14.sp)
-                        Text("Chef-lieu : ${d.chefLieu}", fontSize = 14.sp)
-                        Text("Gentilé : les ${d.gentile}", fontSize = 14.sp)
-                        Text("Population : environ ${d.populationK * 1000} hab. · Superficie : ${d.superficieKm2} km²", fontSize = 14.sp)
-                        if (d.sousPrefs.isNotEmpty()) {
-                            Text("Sous-préfectures : ${d.sousPrefs.joinToString(", ")}", fontSize = 14.sp)
+    } else {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onRetour) { Text("← Menu") }
+                Text("Fiches", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            }
+            TextField(
+                value = recherche,
+                onValueChange = { recherche = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Rechercher (nom, numéro, région)") },
+                singleLine = true
+            )
+            Spacer(Modifier.height(8.dp))
+            val filtres = DEPARTEMENTS.filter {
+                it.nom.contains(recherche, ignoreCase = true) ||
+                    it.numero.contains(recherche) ||
+                    (REGION_Noms[it.region]?.contains(recherche, ignoreCase = true) == true)
+            }
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(filtres) { d ->
+                    Card(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { deptOuvert = d }
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("${d.numero} - ${d.nom}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text("${REGION_Noms[d.region] ?: d.region} · chef-lieu : ${d.chefLieu}", fontSize = 13.sp, color = Color.Gray)
                         }
                     }
                 }
