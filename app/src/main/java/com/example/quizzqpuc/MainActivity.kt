@@ -325,6 +325,7 @@ fun QuizzQpucApp() {
                         { modesActifs = it },
                         onDemarrer = { demarrer() }
                     )
+                    else -> {}
                 }
                 Ecran.QUIZ -> EcranQuiz(
                     question = questions[index],
@@ -572,7 +573,7 @@ fun EcranQuiz(
     onAbandon: () -> Unit
 ) {
     var saisies by remember(question) {
-        mutableStateOf(question.champs.associateWith { "" } as MutableMap<Mode, String>)
+        mutableStateOf<Map<Mode, String>>(question.champs.associateWith { "" })
     }
     var verdicts by remember(question) { mutableStateOf<Map<Mode, Boolean>>(emptyMap()) }
     var verdictCarte by remember(question) { mutableStateOf<Boolean?>(null) }
@@ -606,7 +607,13 @@ fun EcranQuiz(
                             Spacer(Modifier.height(8.dp))
                             CarteFranceLocked(
                                 deptRevele = if (verdictCarte != null) question.dept else null,
-                                onTapDept = { d -> if (verdictCarte == null) verdictCarte = (d.numero == question.dept.numero) }
+                                onTapDept = { d ->
+                                    if (verdictCarte == null) {
+                                        val juste = (d.numero == question.dept.numero)
+                                        verdictCarte = juste
+                                        correct = juste
+                                    }
+                                }
                             )
                         } else {
                             Text("Complète la fiche", fontSize = 19.sp, fontWeight = FontWeight.Bold)
@@ -897,8 +904,8 @@ fun EcranFiches(onRetour: () -> Unit) {
     var recherche by remember { mutableStateOf("") }
     var deptOuvert by remember { mutableStateOf<Departement?>(null) }
 
-    if (deptOuvert != null) {
-        val d = deptOuvert
+    val d = deptOuvert
+    if (d != null) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { deptOuvert = null }) { Text("← Fiches") }
