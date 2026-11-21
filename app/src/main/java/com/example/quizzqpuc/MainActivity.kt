@@ -1,19 +1,6 @@
 // ============================================================================
 // QUIZZ QPUC v2 - Thème : Départements français
 // ============================================================================
-// Nouveautés v2 :
-//  - Menu général (Jouer / Fiches) puis liste des quiz (extensible :
-//    Départements actif ; Rois de France, États américains... à venir)
-//  - Questions sous forme de FICHE A TROUS : la fiche complète est affichée,
-//    seuls les champs choisis dans les options sont vides et à remplir
-//  - Carte : zones de régions colorées et nommées en fond, départements
-//    invisibles avant la réponse, zoom/pan à deux doigts (pincer/écarter)
-//  - Support des images (drapeaux...) par URL dans fiches et questions
-//    (mécanisme prêt ; champs vides pour l'instant, utile pour les
-//    prochaines catégories type États américains)
-//
-// À vérifier toujours : données approximatives (INSEE ~2021).
-// ============================================================================
 
 package com.example.quizzqpuc
 
@@ -41,14 +28,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -68,7 +53,7 @@ data class Departement(
     val sousPrefs: List<String>,
     val mapX: Float,
     val mapY: Float,
-    val imageUrl: String? = null   // drapeau / illustration (v2 : prêt)
+    val imageUrl: String? = null
 )
 
 val REGION_Noms = mapOf(
@@ -267,20 +252,17 @@ enum class Mode(val label: String, val libelleChamp: String) {
     HABITANTS("Nb d'habitants (±5%)", "Habitants (ex : 500000)"),
     SUPERFICIE("Superficie (±10%)", "Superficie km²"),
     CHEF_LIEU("Le chef-lieu", "Chef-lieu"),
-    SOUS_PREF("Sous-préfectures", "Une sous-préfecture")
+    SOUS_PREF("Sous-préfectures", "Une sous-préfecture"),
+    LOCALISATION("La localisation (carte)", "Localisation")
 }
 
 enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES }
 
 data class Question(
     val dept: Departement,
-    val carte: Boolean,                    // question de localisation
-    val champs: List<Mode> = emptyList()   // champs à remplir (fiche à trous)
+    val carte: Boolean,
+    val champs: List<Mode> = emptyList()
 )
-
-// Catégories de quiz : pour en ajouter une, ajouter une ligne ici + son
-// écran de paramètres dans le `when (categorie.id)` de QuizzQpucApp.
-data class Categorie(val id: String, val titre: String, val dispo: Boolean)
 
 val CATEGORIES = listOf(
     Categorie("departements", "Départements français", true),
@@ -288,6 +270,8 @@ val CATEGORIES = listOf(
     Categorie("usa", "États américains", false),
     Categorie("capitales", "Capitales du monde", false)
 )
+
+data class Categorie(val id: String, val titre: String, val dispo: Boolean)
 
 // ----------------------------------------------------------------------------
 // ACTIVITÉ + NAVIGATION
@@ -305,11 +289,9 @@ fun QuizzQpucApp() {
     var ecran by remember { mutableStateOf(Ecran.MENU) }
     var categorie by remember { mutableStateOf(CATEGORIES[0]) }
 
-    // Options
     var nbQuestions by remember { mutableStateOf(20f) }
     var modesActifs by remember { mutableStateOf(Mode.entries.toList()) }
 
-    // État du quiz
     var questions by remember { mutableStateOf(listOf<Question>()) }
     var index by remember { mutableStateOf(0) }
     var reponses by remember { mutableStateOf(listOf<Boolean>()) }
@@ -509,11 +491,6 @@ fun ChampRempli(
     verrouille: Boolean,
     verdict: Boolean? = null
 ) {
-    val couleurBordure = when (verdict) {
-        true -> Color(0xFF2E7D32)
-        false -> Color(0xFFC62828)
-        null -> MaterialTheme.colorScheme.outline
-    }
     TextField(
         value = valeur,
         onValueChange = { if (!verrouille) onSaisie(it) },
@@ -555,6 +532,7 @@ fun valeurFiche(d: Departement, mode: Mode): String = when (mode) {
     Mode.SUPERFICIE -> d.superficieKm2.toString()
     Mode.CHEF_LIEU -> d.chefLieu
     Mode.SOUS_PREF -> d.sousPrefs.firstOrNull() ?: ""
+    Mode.LOCALISATION -> ""
 }
 
 fun champJuste(mode: Mode, d: Departement, reponse: String): Boolean = when (mode) {
@@ -574,6 +552,7 @@ fun champJuste(mode: Mode, d: Departement, reponse: String): Boolean = when (mod
     }
     Mode.CHEF_LIEU -> correctFlechie(reponse, listOf(d.chefLieu))
     Mode.SOUS_PREF -> d.sousPrefs.isNotEmpty() && correctFlechie(reponse, d.sousPrefs)
+    Mode.LOCALISATION -> false
 }
 
 // ----------------------------------------------------------------------------
@@ -630,8 +609,6 @@ fun EcranQuiz(
                             if (question.dept.imageUrl != null) {
                                 ImageUrl(question.dept.imageUrl, "Illustration")
                             }
-                            // Fiche complète : champs demandés = zones de saisie,
-                            // les autres sont affichés en clair
                             val tous = listOf(
                                 Mode.NUMERO, Mode.NOM, Mode.REGION, Mode.GENTILE,
                                 Mode.HABITANTS, Mode.SUPERFICIE, Mode.CHEF_LIEU, Mode.SOUS_PREF
@@ -715,17 +692,13 @@ fun EcranQuiz(
 }
 
 // ----------------------------------------------------------------------------
-// CARTE : zones de régions + zoom/pan + départements révélés après réponse
-// ----------------------------------------------------------------------------
-
-// ----------------------------------------------------------------------------
 // CARTE : zones de régions en fond, zoom/pan à deux doigts, départements
 // invisibles puis révélation après réponse
 // ----------------------------------------------------------------------------
 
 @Composable
 fun CarteFranceLocked(
-    deptRevele: Departement?,                // null = pas encore répondu
+    deptRevele: Departement?,
     onTapDept: (Departement) -> Unit = {}
 ) {
     var echelle by remember { mutableStateOf(1f) }
@@ -739,7 +712,6 @@ fun CarteFranceLocked(
             .background(Color(0xFFEAF3FB), RoundedCornerShape(12.dp))
             .border(2.dp, Color(0xFFB0C4DE), RoundedCornerShape(12.dp))
             .onSizeChanged { taille = it }
-            // Zoom / pan à deux doigts (comme une carte)
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
                     echelle = (echelle * zoom).coerceIn(1f, 10f)
@@ -755,11 +727,9 @@ fun CarteFranceLocked(
                     }
                 }
             }
-            // Tap (un seul doigt, sans bouger) pour répondre
             .pointerInput(deptRevele) {
                 detectTapGestures { offset ->
                     if (taille == IntSize.Zero || deptRevele != null) return@detectTapGestures
-                    // Inverse du zoom centré (pivot par défaut = centre)
                     val px = (offset.x - size.width / 2f - decalage.x) / echelle + size.width / 2f
                     val py = (offset.y - size.height / 2f - decalage.y) / echelle + size.height / 2f
                     val rx = px / size.width / 0.92f
@@ -774,7 +744,6 @@ fun CarteFranceLocked(
                             (proche.mapX - rx) * (proche.mapX - rx) +
                                 (proche.mapY - ry) * (proche.mapY - ry)
                         )
-                        // Tolérance qui diminue quand on zoome
                         if (dist > 0.035f / echelle) {
                             // tap trop loin : on ignore, l'utilisateur zoome
                         } else {
@@ -796,7 +765,6 @@ fun CarteFranceLocked(
             Column(Modifier.padding(6.dp)) {
                 Text("FRANCE - zones de régions", fontSize = 11.sp, color = Color.Gray)
             }
-            // Zones de régions : rectangle englobant les départements de la région
             REGION_Couleurs.forEach { (reg, couleur) ->
                 val deps = DEPARTEMENTS.filter { it.region == reg && it.mapY < 0.96f }
                 if (deps.size >= 1) {
@@ -819,7 +787,6 @@ fun CarteFranceLocked(
                     }
                 }
             }
-            // Révélation après réponse : pastille verte sur le bon département
             if (deptRevele != null && deptRevele.mapY < 0.96f) {
                 Box(
                     Modifier
@@ -839,8 +806,6 @@ fun CarteFranceLocked(
 
 @Composable
 fun ImageUrl(url: String, description: String) {
-    // Nécessite la dépendance Coil dans app/build.gradle.kts et la permission
-    // INTERNET dans le manifest. Voir le guide GitHub.
     coil.compose.AsyncImage(
         model = url,
         contentDescription = description,
@@ -929,23 +894,23 @@ fun EcranFiches(onRetour: () -> Unit) {
     var deptOuvert by remember { mutableStateOf<Departement?>(null) }
 
     if (deptOuvert != null) {
-        // Fiche détaillée
+        val d = deptOuvert
         Column(Modifier.fillMaxSize().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { deptOuvert = null }) { Text("← Fiches") }
             }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    if (deptOuvert!!.imageUrl != null) ImageUrl(deptOuvert!!.imageUrl!!, "Illustration")
-                    Text("${deptOuvert.numero} - ${deptOuvert.nom}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    if (d.imageUrl != null) ImageUrl(d.imageUrl, "Illustration")
+                    Text("${d.numero} - ${d.nom}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text("Région : ${REGION_Noms[deptOuvert.region] ?: deptOuvert.region}", fontSize = 15.sp)
-                    Text("Chef-lieu : ${deptOuvert.chefLieu}", fontSize = 15.sp)
-                    Text("Gentilé : les ${deptOuvert.gentile}", fontSize = 15.sp)
-                    Text("Population : environ ${deptOuvert.populationK * 1000} hab.", fontSize = 15.sp)
-                    Text("Superficie : ${deptOuvert.superficieKm2} km²", fontSize = 15.sp)
-                    if (deptOuvert.sousPrefs.isNotEmpty())
-                        Text("Sous-préfectures : ${deptOuvert.sousPrefs.joinToString(", ")}", fontSize = 15.sp)
+                    Text("Région : ${REGION_Noms[d.region] ?: d.region}", fontSize = 15.sp)
+                    Text("Chef-lieu : ${d.chefLieu}", fontSize = 15.sp)
+                    Text("Gentilé : les ${d.gentile}", fontSize = 15.sp)
+                    Text("Population : environ ${d.populationK * 1000} hab.", fontSize = 15.sp)
+                    Text("Superficie : ${d.superficieKm2} km²", fontSize = 15.sp)
+                    if (d.sousPrefs.isNotEmpty())
+                        Text("Sous-préfectures : ${d.sousPrefs.joinToString(", ")}", fontSize = 15.sp)
                 }
             }
         }
@@ -969,16 +934,16 @@ fun EcranFiches(onRetour: () -> Unit) {
                     (REGION_Noms[it.region]?.contains(recherche, ignoreCase = true) == true)
             }
             LazyColumn(Modifier.fillMaxSize()) {
-                items(filtres) { d ->
+                items(filtres) { dep ->
                     Card(
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .clickable { deptOuvert = d }
+                            .clickable { deptOuvert = dep }
                     ) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("${d.numero} - ${d.nom}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            Text("${REGION_Noms[d.region] ?: d.region} · chef-lieu : ${d.chefLieu}", fontSize = 13.sp, color = Color.Gray)
+                            Text("${dep.numero} - ${dep.nom}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text("${REGION_Noms[dep.region] ?: dep.region} · chef-lieu : ${dep.chefLieu}", fontSize = 13.sp, color = Color.Gray)
                         }
                     }
                 }
