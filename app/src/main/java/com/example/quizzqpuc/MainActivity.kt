@@ -382,12 +382,16 @@ fun EcranListeQuiz(onRetour: () -> Unit, onChoix: (Categorie) -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         CATEGORIES.forEach { c ->
+            val titre = if (c.dispo) c.titre else "${c.titre} (à venir...)"
             Button(
                 onClick = { onChoix(c) },
                 enabled = c.dispo,
-                Modifier.fillMaxWidth().height(60.dp).padding(vertical = 4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .padding(vertical = 4.dp)
             ) {
-                Text(if (c.dispo) c.titre else "${c.titre} (à venir...)", fontSize = 18.sp)
+                Text(titre, fontSize = 18.sp)
             }
             Spacer(Modifier.height(4.dp))
         }
@@ -936,7 +940,7 @@ fun EcranFiches(onRetour: () -> Unit) {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(filtres) { dep ->
                     Card(
-                        Modifier
+                        modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                             .clickable { deptOuvert = dep }
