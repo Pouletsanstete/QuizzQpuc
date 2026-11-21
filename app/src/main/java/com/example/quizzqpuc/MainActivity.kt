@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
@@ -245,6 +246,11 @@ enum class Mode(val label: String, val libelleChamp: String, val nom: String) {
     NOM("Le nom (n° -> nom)", "Nom du département", "Nom"),
     NUMERO("Le numéro (nom -> n°)", "Numéro", "Numéro"),
     REGION("La région", "Région", "Région"),
+    AUTRES_DEPTS(
+        "Les autres départements de la région",
+        "Autres départements de la région",
+        "Autres départements de la région"
+    ),
     GENTILE("Le gentilé", "Gentilé (les ...)", "Gentilé"),
     HABITANTS("Nb d'habitants ($TOL_TXT)", "Habitants\n(ex : 500000, $TOL_TXT)", "Habitants"),
     SUPERFICIE("Superficie ($TOL_TXT)", "Superficie (km²)\n($TOL_TXT)", "Superficie (km²)"),
@@ -261,11 +267,12 @@ data class Question(
     val champs: List<Mode> = emptyList()
 )
 
+// dispo = false : catégorie en chantier, cachée dans le menu (le code reste là)
 val CATEGORIES = listOf(
     Categorie("departements", "Départements français", true),
+    Categorie("pays", "Pays du monde", false),
     Categorie("rois", "Rois de France", false),
-    Categorie("usa", "États américains", false),
-    Categorie("capitales", "Capitales du monde", false)
+    Categorie("usa", "États américains", false)
 )
 
 data class Categorie(val id: String, val titre: String, val dispo: Boolean)
@@ -379,17 +386,15 @@ fun EcranListeQuiz(onRetour: () -> Unit, onChoix: (Categorie) -> Unit) {
             Text("Choisis un quiz", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(12.dp))
-        CATEGORIES.forEach { c ->
-            val titre = if (c.dispo) c.titre else "${c.titre} (à venir...)"
+        CATEGORIES.filter { it.dispo }.forEach { c ->
             Button(
                 onClick = { onChoix(c) },
-                enabled = c.dispo,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(60.dp)
                     .padding(vertical = 4.dp)
             ) {
-                Text(titre, fontSize = 18.sp)
+                Text(c.titre, fontSize = 18.sp)
             }
             Spacer(Modifier.height(4.dp))
         }
@@ -400,9 +405,42 @@ fun EcranListeQuiz(onRetour: () -> Unit, onChoix: (Categorie) -> Unit) {
 // PARAMÈTRES DU QUIZ DÉPARTEMENTS
 // ----------------------------------------------------------------------------
 
-/** Champs à remplir pour un département (Paris n'a pas de sous-préfecture, par exemple). */
-fun champsPour(d: Departement, modes: List<Mode>): List<Mode> =
-    modes.filter { it != Mode.LOCALISATION && !(it == Mode.SOUS_PREF && d.sousPrefs.isEmpty()) }
+/** Champs qui permettent de reconnaître un département : l'un d'eux reste toujours affiché. */
+val CHAMPS_IDENTIFIANTS = listOf(Mode.NUMERO, Mode.NOM, Mode.CHEF_LIEU, Mode.GENTILE)
+
+/**
+ * Champs à remplir pour un département.
+ * - Paris n'a pas de sous-préfecture : ce champ n'est pas demandé.
+ * - Si tous les champs identifiants sont demandés, l'un d'eux (au hasard) reste affiché,
+ *   sinon on ne saurait pas de quel département on parle.
+ */
+fun champsPour(d: Departement, modes: List<Mode>): List<Mode> {
+    val champs = modes.filter { it != Mode.LOCALISATION && !(it == Mode.SOUS_PREF && d.sousPrefs.isEmpty()) }
+    val resteAffiche = CHAMPS_IDENTIFIANTS.any { it !in champs }
+    return if (resteAffiche) champs else champs - CHAMPS_IDENTIFIANTS.random()
+}
+
+/** Les autres départements de la même région. */
+fun autresDepartements(d: Departement): List<Departement> =
+    DEPARTEMENTS.filter { it.region == d.region && it.numero != d.numero }
+
+/** Découpe « Yvelines, Essonne ; 92 » en réponses séparées. */
+fun decouperListe(saisie: String): List<String> =
+    saisie.split(',', ';', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+
+/**
+ * Corrige la liste des autres départements de la région (ordre libre, nom ou numéro accepté).
+ * Renvoie les départements manquants et le nombre de réponses en trop.
+ */
+fun verifierAutresDepts(d: Departement, saisie: String): Pair<List<Departement>, Int> {
+    val restants = autresDepartements(d).toMutableList()
+    var enTrop = 0
+    decouperListe(saisie).forEach { rep ->
+        val i = restants.indexOfFirst { normaliser(rep) == normaliser(it.numero) || correspond(rep, it.nom) }
+        if (i >= 0) restants.removeAt(i) else enTrop++
+    }
+    return restants to enTrop
+}
 
 fun genererQuestions(nb: Int, modes: List<Mode>): List<Question> {
     val liste = mutableListOf<Question>()
@@ -449,6 +487,11 @@ fun EcranParamsDepartements(
 
         Spacer(Modifier.height(16.dp))
         Text("Champs à remplir dans la fiche", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Un champ qui permet d'identifier le département (n°, nom, chef-lieu ou gentilé) " +
+                "reste toujours affiché.",
+            fontSize = 13.sp, color = Color.Gray
+        )
 
         Mode.entries.forEach { mode ->
             val actif = mode in modesActifs
@@ -497,7 +540,8 @@ fun ChampRempli(
     valeur: String,
     onSaisie: (String) -> Unit,
     verrouille: Boolean,
-    verdict: Boolean? = null
+    verdict: Boolean? = null,
+    multiligne: Boolean = false
 ) {
     TextField(
         value = valeur,
@@ -506,7 +550,9 @@ fun ChampRempli(
             .fillMaxWidth()
             .padding(vertical = 2.dp),
         label = { Text(libelle, fontSize = 13.sp) },
-        singleLine = true,
+        singleLine = !multiligne,
+        minLines = if (multiligne) 3 else 1,
+        maxLines = if (multiligne) 8 else 1,
         enabled = !verrouille,
         isError = verdict == false,
         supportingText = {
@@ -535,6 +581,7 @@ fun valeurFiche(d: Departement, mode: Mode): String = when (mode) {
     Mode.NOM -> d.nom
     Mode.NUMERO -> d.numero
     Mode.REGION -> REGION_Noms[d.region] ?: d.region
+    Mode.AUTRES_DEPTS -> autresDepartements(d).joinToString(", ") { it.nom }
     Mode.GENTILE -> d.gentile
     Mode.HABITANTS -> (d.populationK * 1000).toString()
     Mode.SUPERFICIE -> d.superficieKm2.toString()
@@ -566,6 +613,7 @@ fun champJuste(mode: Mode, d: Departement, reponse: String): Boolean = when (mod
     Mode.NOM -> correctFlechie(reponse, listOf(d.nom))
     Mode.NUMERO -> normaliser(reponse) == normaliser(d.numero)
     Mode.REGION -> correctFlechie(reponse, listOf(REGION_Noms[d.region] ?: d.region))
+    Mode.AUTRES_DEPTS -> verifierAutresDepts(d, reponse).let { (manquants, enTrop) -> manquants.isEmpty() && enTrop == 0 }
     Mode.GENTILE -> correctFlechie(reponse, listOf(d.gentile))
     Mode.HABITANTS -> dansTolerance(reponse.filter { it.isDigit() }.toIntOrNull() ?: 0, d.populationK * 1000)
     Mode.SUPERFICIE -> dansTolerance(reponse.filter { it.isDigit() }.toIntOrNull() ?: 0, d.superficieKm2)
@@ -595,6 +643,7 @@ fun EcranQuiz(
     }
     var verdictsSP by remember(question) { mutableStateOf<List<Boolean>>(emptyList()) }
     var verdicts by remember(question) { mutableStateOf<Map<Mode, Boolean>>(emptyMap()) }
+    var detailAutres by remember(question) { mutableStateOf("") }
     var choixCarte by remember(question) { mutableStateOf<String?>(null) }
     var carteValidee by remember(question) { mutableStateOf(false) }
     var correct by remember(question) { mutableStateOf(false) }
@@ -618,7 +667,7 @@ fun EcranQuiz(
                     .border(4.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
             ) {
                 Text(
-                    "Où se trouve ${question.dept.nom} ? Touche son département sur la carte (pince pour zoomer).",
+                    "Localise le département ${question.dept.numero} ${question.dept.nom} sur la carte. (Pince pour zoomer)",
                     fontSize = 18.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(14.dp)
                 )
@@ -646,7 +695,7 @@ fun EcranQuiz(
                                 ImageUrl(question.dept.imageUrl, "Illustration")
                             }
                             val tous = listOf(
-                                Mode.NUMERO, Mode.NOM, Mode.REGION, Mode.GENTILE,
+                                Mode.NUMERO, Mode.NOM, Mode.REGION, Mode.AUTRES_DEPTS, Mode.GENTILE,
                                 Mode.HABITANTS, Mode.SUPERFICIE, Mode.CHEF_LIEU, Mode.SOUS_PREF
                             )
                             tous.forEach { mode ->
@@ -675,18 +724,24 @@ fun EcranQuiz(
                                         )
                                     }
                                 } else {
+                                    val autres = mode == Mode.AUTRES_DEPTS
                                     ChampRempli(
-                                        libelle = mode.libelleChamp,
+                                        libelle = if (autres) {
+                                            "${mode.libelleChamp}\n(${autresDepartements(question.dept).size} à citer, " +
+                                                "séparés par des virgules)"
+                                        } else mode.libelleChamp,
                                         valeur = saisies[mode] ?: "",
                                         onSaisie = { nvx ->
                                             saisies = saisies.toMutableMap().apply { put(mode, nvx) }
                                         },
                                         verrouille = verdicts.isNotEmpty(),
-                                        verdict = verdicts[mode]
+                                        verdict = verdicts[mode],
+                                        multiligne = autres
                                     )
                                     if (verdicts[mode] == false) {
                                         Text(
-                                            "Attendu : ${valeurFiche(question.dept, mode)}",
+                                            if (autres) detailAutres
+                                            else "Attendu : ${valeurFiche(question.dept, mode)}",
                                             fontSize = 13.sp,
                                             color = Color(0xFFC62828),
                                             modifier = Modifier.padding(start = 16.dp)
@@ -694,6 +749,10 @@ fun EcranQuiz(
                                     }
                                 }
                             }
+                            // Localisation toujours donnée dans la fiche (sauf question de localisation)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Localisation", fontSize = 14.sp, color = Color.Gray)
+                            CarteFranceMini(question.dept.numero)
                         }
                     }
                 }
@@ -717,6 +776,14 @@ fun EcranQuiz(
                         }
                         verdicts = nouveaux
                         correct = nouveaux.values.all { it }
+                        if (Mode.AUTRES_DEPTS in question.champs) {
+                            val (manquants, enTrop) = verifierAutresDepts(question.dept, saisies[Mode.AUTRES_DEPTS] ?: "")
+                            detailAutres = buildString {
+                                if (manquants.isNotEmpty()) append("Manque : ${manquants.joinToString(", ") { it.nom }}")
+                                if (manquants.isNotEmpty() && enTrop > 0) append("\n")
+                                if (enTrop > 0) append("En trop ou mal écrit : $enTrop réponse(s)")
+                            }
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(54.dp),
@@ -799,6 +866,9 @@ class FormeDept(val numero: String, val anneaux: List<FloatArray>) {
         }
         minX = x0; minY = y0; maxX = x1; maxY = y1
     }
+
+    val centreX: Float get() = (minX + maxX) / 2f
+    val centreY: Float get() = (minY + maxY) / 2f
 
     /** Point dans le département ? (règle pair/impair sur tous les anneaux) */
     fun contient(x: Float, y: Float): Boolean {
@@ -951,28 +1021,65 @@ fun CarteFrance(
             val tx = (size.width - geo.largeur * k) / 2f + decalage.x
             val ty = (size.height - geo.hauteur * k) / 2f + decalage.y
             val px = 1.dp.toPx()
-            withTransform({
-                translate(tx, ty)
-                scale(k, k, Offset.Zero)
-            }) {
-                geo.departements.forEach { d ->
-                    val couleur = when {
-                        reponse != null && d.numero == reponse -> VERT_BON
-                        reponse != null && d.numero == choix -> ROUGE_FAUX
-                        reponse == null && d.numero == choix -> BLEU_CHOIX
-                        else -> GRIS_DEPT
-                    }
-                    drawPath(d.chemin, couleur)
+            dessinerCarte(geo, k, tx, ty, 0.6f * px, 1.6f * px) { numero ->
+                when {
+                    reponse != null && numero == reponse -> VERT_BON
+                    reponse != null && numero == choix -> ROUGE_FAUX
+                    reponse == null && numero == choix -> BLEU_CHOIX
+                    else -> GRIS_DEPT
                 }
-                // épaisseurs divisées par k : le trait garde la même taille à l'écran quel que soit le zoom
-                geo.departements.forEach { d ->
-                    drawPath(d.chemin, GRIS_LIMITE, style = Stroke(width = 0.6f * px / k))
-                }
-                drawPath(
-                    geo.contoursRegions, Color.Black,
-                    style = Stroke(width = 1.6f * px / k, join = StrokeJoin.Round)
-                )
             }
+        }
+    }
+}
+
+/**
+ * Dessine la carte. Les épaisseurs de trait (en pixels écran) sont divisées par k :
+ * le trait garde la même taille à l'écran quel que soit le zoom.
+ */
+private fun DrawScope.dessinerCarte(
+    geo: CarteGeo,
+    k: Float,
+    tx: Float,
+    ty: Float,
+    traitDept: Float,
+    traitRegion: Float,
+    couleurDe: (String) -> Color
+) {
+    withTransform({
+        translate(tx, ty)
+        scale(k, k, Offset.Zero)
+    }) {
+        geo.departements.forEach { d -> drawPath(d.chemin, couleurDe(d.numero)) }
+        geo.departements.forEach { d -> drawPath(d.chemin, GRIS_LIMITE, style = Stroke(width = traitDept / k)) }
+        drawPath(
+            geo.contoursRegions, Color.Black,
+            style = Stroke(width = traitRegion / k, join = StrokeJoin.Round)
+        )
+    }
+}
+
+/** Petite carte non interactive : le département `numero` est en bleu, entouré d'un cercle rouge. */
+@Composable
+fun CarteFranceMini(numero: String, modifier: Modifier = Modifier) {
+    val contexte = LocalContext.current
+    val geo = remember { CarteCache.obtenir(contexte) }
+    Canvas(modifier.fillMaxWidth().height(200.dp).clipToBounds()) {
+        val k = min(size.width / geo.largeur, size.height / geo.hauteur)
+        val tx = (size.width - geo.largeur * k) / 2f
+        val ty = (size.height - geo.hauteur * k) / 2f
+        val px = 1.dp.toPx()
+        dessinerCarte(geo, k, tx, ty, 0.5f * px, 1.1f * px) { n ->
+            if (n == numero) BLEU_CHOIX else GRIS_DEPT
+        }
+        // le cercle aide à repérer les petits départements (Paris, Hauts-de-Seine...)
+        geo.departements.firstOrNull { it.numero == numero }?.let { d ->
+            drawCircle(
+                Color(0xFFD32F2F),
+                radius = 10.dp.toPx(),
+                center = Offset(tx + d.centreX * k, ty + d.centreY * k),
+                style = Stroke(width = 1.8f * px)
+            )
         }
     }
 }
@@ -1072,7 +1179,7 @@ fun EcranFiches(onRetour: () -> Unit) {
 
     val d = deptOuvert
     if (d != null) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { deptOuvert = null }) { Text("← Fiches") }
             }
@@ -1082,12 +1189,19 @@ fun EcranFiches(onRetour: () -> Unit) {
                     Text("${d.numero} - ${d.nom}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     Text("Région : ${REGION_Noms[d.region] ?: d.region}", fontSize = 15.sp)
+                    Text(
+                        "Autres départements de la région : ${valeurFiche(d, Mode.AUTRES_DEPTS)}",
+                        fontSize = 15.sp
+                    )
                     Text("Chef-lieu : ${d.chefLieu}", fontSize = 15.sp)
                     Text("Gentilé : les ${d.gentile}", fontSize = 15.sp)
                     Text("Population : environ ${d.populationK * 1000} hab.", fontSize = 15.sp)
                     Text("Superficie (km²) : ${d.superficieKm2}", fontSize = 15.sp)
                     if (d.sousPrefs.isNotEmpty())
                         Text("Sous-préfecture(s) : ${d.sousPrefs.joinToString(", ")}", fontSize = 15.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Localisation", fontSize = 14.sp, color = Color.Gray)
+                    CarteFranceMini(d.numero)
                 }
             }
         }
