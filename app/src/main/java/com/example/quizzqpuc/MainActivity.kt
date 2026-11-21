@@ -275,7 +275,7 @@ enum class Mode(val label: String, val libelleChamp: String, val nom: String) {
     LOCALISATION("La localisation (carte)", "Localisation", "Localisation")
 }
 
-enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES }
+enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES_CHOIX, FICHES, FICHES_PAYS }
 
 data class Question(
     val dept: Departement,
@@ -286,7 +286,7 @@ data class Question(
 // dispo = false : catégorie en chantier, cachée dans le menu (le code reste là)
 val CATEGORIES = listOf(
     Categorie("departements", "Départements français", true),
-    Categorie("pays", "Pays du monde", false),
+    Categorie("pays", "Pays du monde", true),
     Categorie("rois", "Rois de France", false),
     Categorie("usa", "États américains", false)
 )
@@ -328,7 +328,7 @@ fun QuizzQpucApp() {
             when (ecran) {
                 Ecran.MENU -> EcranMenu(
                     onJouer = { ecran = Ecran.LISTE_QUIZ },
-                    onFiches = { ecran = Ecran.FICHES }
+                    onFiches = { ecran = Ecran.FICHES_CHOIX }
                 )
                 Ecran.LISTE_QUIZ -> EcranListeQuiz(
                     onRetour = { ecran = Ecran.MENU },
@@ -345,6 +345,7 @@ fun QuizzQpucApp() {
                         { modesActifs = it },
                         onDemarrer = { demarrer() }
                     )
+                    "pays" -> QuizPays(onRetour = { ecran = Ecran.LISTE_QUIZ })
                     else -> {}
                 }
                 Ecran.QUIZ -> EcranQuiz(
@@ -362,7 +363,13 @@ fun QuizzQpucApp() {
                     onRef = { demarrer() },
                     onMenu = { ecran = Ecran.LISTE_QUIZ }
                 )
-                Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.MENU })
+                Ecran.FICHES_CHOIX -> EcranChoixFiches(
+                    onRetour = { ecran = Ecran.MENU },
+                    onDepartements = { ecran = Ecran.FICHES },
+                    onPays = { ecran = Ecran.FICHES_PAYS }
+                )
+                Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.FICHES_CHOIX })
+                Ecran.FICHES_PAYS -> EcranFichesPays(onRetour = { ecran = Ecran.FICHES_CHOIX })
             }
         }
     }
@@ -913,7 +920,7 @@ class CarteGeo(
     val contoursRegions: Path
 )
 
-private fun ajouterAnneau(chemin: Path, a: FloatArray) {
+fun ajouterAnneau(chemin: Path, a: FloatArray) {
     if (a.size < 6) return
     chemin.moveTo(a[0], a[1])
     var i = 2
@@ -925,7 +932,7 @@ private fun ajouterAnneau(chemin: Path, a: FloatArray) {
 }
 
 /** Anneau encodé en différences : [x0, y0, dx1, dy1, dx2, dy2, ...] */
-private fun lireAnneau(j: JSONArray): FloatArray {
+fun lireAnneau(j: JSONArray): FloatArray {
     val a = FloatArray(j.length())
     var x = 0
     var y = 0
