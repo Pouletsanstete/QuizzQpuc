@@ -277,7 +277,7 @@ enum class Mode(val label: String, val libelleChamp: String, val nom: String) {
     LOCALISATION("La localisation (carte)", "Localisation", "Localisation")
 }
 
-enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES_CHOIX, FICHES, FICHES_PAYS }
+enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES_CHOIX, FICHES, FICHES_PAYS, FICHES_ETATS }
 
 data class Question(
     val dept: Departement,
@@ -290,7 +290,7 @@ val CATEGORIES = listOf(
     Categorie("departements", "Départements français", true),
     Categorie("pays", "Pays du monde", true),
     Categorie("rois", "Rois de France", false),
-    Categorie("usa", "États américains", false)
+    Categorie("usa", "États américains", true)
 )
 
 data class Categorie(val id: String, val titre: String, val dispo: Boolean)
@@ -336,7 +336,7 @@ fun QuizzQpucApp() {
             Ecran.QUIZ -> confirmerQuitter = true
             Ecran.LISTE_QUIZ, Ecran.FICHES_CHOIX -> ecran = Ecran.MENU
             Ecran.PARAMS, Ecran.RESULTATS -> ecran = Ecran.LISTE_QUIZ
-            Ecran.FICHES, Ecran.FICHES_PAYS -> ecran = Ecran.FICHES_CHOIX
+            Ecran.FICHES, Ecran.FICHES_PAYS, Ecran.FICHES_ETATS -> ecran = Ecran.FICHES_CHOIX
             Ecran.MENU -> {}
         }
     }
@@ -373,6 +373,7 @@ fun QuizzQpucApp() {
                             }
                         )
                         "pays" -> QuizPays(onRetour = { ecran = Ecran.LISTE_QUIZ })
+                        "usa" -> QuizEtats(onRetour = { ecran = Ecran.LISTE_QUIZ })
                         else -> {}
                     }
                     Ecran.QUIZ -> EcranQuiz(
@@ -400,10 +401,12 @@ fun QuizzQpucApp() {
                     Ecran.FICHES_CHOIX -> EcranChoixFiches(
                         onRetour = { ecran = Ecran.MENU },
                         onDepartements = { ecran = Ecran.FICHES },
-                        onPays = { ecran = Ecran.FICHES_PAYS }
+                        onPays = { ecran = Ecran.FICHES_PAYS },
+                        onEtats = { ecran = Ecran.FICHES_ETATS }
                     )
                     Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.FICHES_CHOIX })
                     Ecran.FICHES_PAYS -> EcranFichesPays(onRetour = { ecran = Ecran.FICHES_CHOIX })
+                    Ecran.FICHES_ETATS -> EcranFichesEtats()
                 }
             }
         }
@@ -1006,8 +1009,8 @@ fun lireAnneau(j: JSONArray): FloatArray {
     return a
 }
 
-fun chargerCarte(ctx: Context): CarteGeo {
-    val texte = ctx.assets.open("carte_france.json").bufferedReader().use { it.readText() }
+fun chargerCarte(ctx: Context, fichier: String = "carte_france.json"): CarteGeo {
+    val texte = ctx.assets.open(fichier).bufferedReader().use { it.readText() }
     val racine = JSONObject(texte)
     val d = racine.getJSONArray("d")
     val formes = ArrayList<FormeDept>(d.length())
@@ -1032,8 +1035,9 @@ fun chargerCarte(ctx: Context): CarteGeo {
 
 /** La carte n'est lue qu'une fois, puis gardée en mémoire. */
 object CarteCache {
-    private var geo: CarteGeo? = null
-    fun obtenir(ctx: Context): CarteGeo = geo ?: chargerCarte(ctx.applicationContext).also { geo = it }
+    private val cartes = HashMap<String, CarteGeo>()
+    fun obtenir(ctx: Context, fichier: String = "carte_france.json"): CarteGeo =
+        cartes.getOrPut(fichier) { chargerCarte(ctx.applicationContext, fichier) }
 }
 
 /** Garde la carte dans la vue : pas de bord vide quand on zoome, centrée quand elle est plus petite. */
@@ -1055,10 +1059,11 @@ fun CarteFrance(
     choix: String?,
     reponse: String?,
     onChoix: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fichier: String = "carte_france.json"
 ) {
     val contexte = LocalContext.current
-    val geo = remember { CarteCache.obtenir(contexte) }
+    val geo = remember(fichier) { CarteCache.obtenir(contexte, fichier) }
     var zoom by remember { mutableStateOf(1f) }
     var decalage by remember { mutableStateOf(Offset.Zero) }
     var taille by remember { mutableStateOf(IntSize.Zero) }
@@ -1155,9 +1160,21 @@ private fun DrawScope.dessinerCarte(
  */
 @Composable
 fun CarteFranceMini(numero: String, modifier: Modifier = Modifier) {
-    val contexte = LocalContext.current
-    val geo = remember { CarteCache.obtenir(contexte) }
     val noms = remember { DEPARTEMENTS.associate { it.numero to it.nom } }
+    CarteRegionMini("carte_france.json", numero, noms, "chef-lieu", modifier)
+}
+
+/** Mini-carte générique (départements français, États américains...) : voir CarteFranceMini. */
+@Composable
+fun CarteRegionMini(
+    fichier: String,
+    numero: String,
+    noms: Map<String, String>,
+    repere: String,
+    modifier: Modifier = Modifier
+) {
+    val contexte = LocalContext.current
+    val geo = remember(fichier) { CarteCache.obtenir(contexte, fichier) }
     val vue = remember(numero) { VueZoom() }
     val tm = rememberTextMeasurer()
     Column(modifier.fillMaxWidth()) {
@@ -1207,7 +1224,7 @@ fun CarteFranceMini(numero: String, modifier: Modifier = Modifier) {
                 drawCircle(Color(0xFFD32F2F), radius = 3.6f.dp.toPx(), center = centre)
             }
         }
-        LegendeCarte(vue, "chef-lieu")
+        LegendeCarte(vue, repere)
     }
 }
 

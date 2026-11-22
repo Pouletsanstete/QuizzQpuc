@@ -358,7 +358,7 @@ fun Drapeau(iso2: String, modifier: Modifier = Modifier, hauteur: Dp = 90.dp) {
             contentScale = ContentScale.Fit,
             modifier = modifier
                 .height(hauteur)
-                .aspectRatio(4f / 3f)
+                .aspectRatio(image.width.toFloat() / image.height.toFloat())
                 .border(1.dp, Color(0xFFB0B0B0))
         )
     }
@@ -1187,7 +1187,7 @@ fun EcranResultatsPays(
 // ----------------------------------------------------------------------------
 
 @Composable
-fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: () -> Unit) {
+fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: () -> Unit, onEtats: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("Fiches", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
@@ -1197,6 +1197,10 @@ fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: (
         Spacer(Modifier.height(12.dp))
         Button(onClick = onPays, Modifier.fillMaxWidth().height(60.dp)) {
             Text("Pays du monde", fontSize = 18.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onEtats, Modifier.fillMaxWidth().height(60.dp)) {
+            Text("États américains", fontSize = 18.sp)
         }
     }
 }
