@@ -29,6 +29,7 @@ object Sauvegarde {
 }
 
 data class PartieDepts(val questions: List<Question>, val index: Int, val reponses: List<Boolean>)
+data class PartieEtats(val questions: List<QuestionEtat>, val index: Int, val reponses: List<Boolean>)
 data class PartiePays(val questions: List<QuestionPays>, val index: Int, val reponses: List<Boolean>)
 
 private fun versJson(reponses: List<Boolean>): JSONArray {
@@ -123,6 +124,50 @@ fun lirePartiePays(ctx: Context, tous: List<Pays>): PartiePays? {
         val index = o.getInt("i")
         if (questions.isEmpty() || index !in questions.indices) return null
         return PartiePays(questions, index, List(r.length()) { r.getBoolean(it) })
+    } catch (e: Exception) {
+        return null
+    }
+}
+
+// ---------------------------------------------------------------- États américains
+
+fun sauverPartieEtats(ctx: Context, questions: List<QuestionEtat>, index: Int, reponses: List<Boolean>) {
+    val q = JSONArray()
+    questions.forEach { x ->
+        q.put(
+            JSONObject()
+                .put("e", x.etat.code)
+                .put("t", x.type.name)
+                .put("m", versJsonTextes(x.champs.map { it.name }))
+                .put("c", versJsonTextes(x.choix.map { it.code }))
+        )
+    }
+    val o = JSONObject().put("q", q).put("i", index).put("r", versJson(reponses))
+    Sauvegarde.ecrire(ctx, "etats", o.toString())
+}
+
+fun effacerPartieEtats(ctx: Context) = Sauvegarde.ecrire(ctx, "etats", null)
+
+fun lirePartieEtats(ctx: Context, tous: List<Etat>): PartieEtats? {
+    try {
+        val s = Sauvegarde.lire(ctx, "etats") ?: return null
+        val o = JSONObject(s)
+        val q = o.getJSONArray("q")
+        val r = o.getJSONArray("r")
+        val questions = List(q.length()) { i ->
+            val e = q.getJSONObject(i)
+            val m = e.getJSONArray("m")
+            val c = e.getJSONArray("c")
+            QuestionEtat(
+                tous.first { it.code == e.getString("e") },
+                TypeQ.valueOf(e.getString("t")),
+                List(m.length()) { ModeEtat.valueOf(m.getString(it)) },
+                List(c.length()) { k -> tous.first { it.code == c.getString(k) } }
+            )
+        }
+        val index = o.getInt("i")
+        if (questions.isEmpty() || index !in questions.indices) return null
+        return PartieEtats(questions, index, List(r.length()) { r.getBoolean(it) })
     } catch (e: Exception) {
         return null
     }
