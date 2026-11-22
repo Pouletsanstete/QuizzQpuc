@@ -12,6 +12,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -35,6 +41,16 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -369,7 +385,9 @@ class MondeGeo(
     val fond: Path,
     val continents: Path,
     val marqueurs: List<Marqueur>,
-    val centres: Map<String, Offset>
+    val centres: Map<String, Offset>,
+    val tailles: Map<String, Offset>,
+    val capitales: Map<String, Offset>
 )
 
 fun chargerMonde(ctx: Context): MondeGeo {
@@ -378,6 +396,7 @@ fun chargerMonde(ctx: Context): MondeGeo {
     val d = racine.getJSONArray("d")
     val formes = ArrayList<FormeDept>(d.length())
     val centres = HashMap<String, Offset>()
+    val tailles = HashMap<String, Offset>()
     for (i in 0 until d.length()) {
         val e = d.getJSONArray(i)
         val anneauxJson = e.getJSONArray(1)
@@ -402,6 +421,7 @@ fun chargerMonde(ctx: Context): MondeGeo {
             if (surface > meilleur) {
                 meilleur = surface
                 centres[code] = Offset((x0 + x1) / 2f, (y0 + y1) / 2f)
+                tailles[code] = Offset(x1 - x0, y1 - y0)
             }
         }
     }
@@ -417,9 +437,17 @@ fun chargerMonde(ctx: Context): MondeGeo {
         Marqueur(e.getString(0), e.getInt(1).toFloat(), e.getInt(2).toFloat())
     }
     marqueurs.forEach { centres[it.iso3] = Offset(it.x, it.y) }
+    val capitales = HashMap<String, Offset>()
+    val cp = racine.optJSONArray("c")
+    if (cp != null) {
+        for (i in 0 until cp.length()) {
+            val e = cp.getJSONArray(i)
+            capitales[e.getString(0)] = Offset(e.getInt(1).toFloat(), e.getInt(2).toFloat())
+        }
+    }
     return MondeGeo(
         racine.getInt("w").toFloat(), racine.getInt("h").toFloat(),
-        formes, fond, continents, marqueurs, centres
+        formes, fond, continents, marqueurs, centres, tailles, capitales
     )
 }
 
@@ -554,31 +582,159 @@ fun CarteMonde(
     }
 }
 
-/** Petite carte non interactive : le pays est en bleu, entouré d'un cercle rouge. */
+// ----------------------------------------------------------------------------
+// MINI-CARTES DES FICHES : zoom (pincer), déplacement, point rouge, noms des voisins
+// ----------------------------------------------------------------------------
+
+class VueZoom {
+    var zoom by mutableStateOf(1f)
+    var decalage by mutableStateOf(Offset.Zero)
+    fun reinit() {
+        zoom = 1f
+        decalage = Offset.Zero
+    }
+}
+
+/** Garde la carte dans la vue (pas de bord vide), centrée quand elle est plus petite que la vue. */
+fun limiterVue(pan: Offset, k: Float, lw: Float, lh: Float, largeur: Float, hauteur: Float): Offset {
+    val debX = largeur * k - lw
+    val debY = hauteur * k - lh
+    return Offset(
+        if (debX <= 0f) 0f else pan.x.coerceIn(-debX / 2f, debX / 2f),
+        if (debY <= 0f) 0f else pan.y.coerceIn(-debY / 2f, debY / 2f)
+    )
+}
+
+/**
+ * Pincer = zoomer. Un doigt déplace la carte seulement quand elle est zoomée :
+ * à zoom 1, un doigt fait défiler la page normalement.
+ */
+fun Modifier.zoomPanMini(vue: VueZoom, largeur: Float, hauteur: Float, zoomMax: Float): Modifier =
+    this.pointerInput(vue) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            while (true) {
+                val ev = awaitPointerEvent()
+                if (ev.changes.none { it.pressed }) break
+                val nbDoigts = ev.changes.count { it.pressed }
+                if (nbDoigts >= 2 || vue.zoom > 1.001f) {
+                    val zg = ev.calculateZoom()
+                    val pan = ev.calculatePan()
+                    val centre = ev.calculateCentroid()
+                    val lw = size.width.toFloat()
+                    val lh = size.height.toFloat()
+                    if ((zg != 1f || pan != Offset.Zero) && lw > 0f && lh > 0f) {
+                        val fit = min(lw / largeur, lh / hauteur)
+                        val kAvant = fit * vue.zoom
+                        val zoomApres = (vue.zoom * zg).coerceIn(1f, zoomMax)
+                        val kApres = fit * zoomApres
+                        val mx = (centre.x - ((lw - largeur * kAvant) / 2f + vue.decalage.x)) / kAvant
+                        val my = (centre.y - ((lh - hauteur * kAvant) / 2f + vue.decalage.y)) / kAvant
+                        val panX = centre.x - mx * kApres - (lw - largeur * kApres) / 2f + pan.x
+                        val panY = centre.y - my * kApres - (lh - hauteur * kApres) / 2f + pan.y
+                        vue.zoom = zoomApres
+                        vue.decalage = limiterVue(Offset(panX, panY), kApres, lw, lh, largeur, hauteur)
+                        ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                    }
+                }
+            }
+        }
+    }
+
+/** Écrit le premier texte de la liste qui tient dans la zone (sinon rien). */
+fun DrawScope.etiquette(
+    tm: TextMeasurer,
+    textes: List<String>,
+    cx: Float,
+    cy: Float,
+    largeurPx: Float,
+    taille: TextUnit,
+    couleur: Color
+) {
+    for (t in textes) {
+        val r = tm.measure(AnnotatedString(t), TextStyle(fontSize = taille, color = couleur))
+        if (r.size.width <= largeurPx * 1.1f) {
+            drawText(r, topLeft = Offset(cx - r.size.width / 2f, cy - r.size.height / 2f))
+            return
+        }
+    }
+}
+
+@Composable
+fun LegendeCarte(vue: VueZoom, repere: String) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = Color(0xFFD32F2F))) { append("●") }
+                append(" $repere · pince pour zoomer, glisse pour te déplacer")
+            },
+            fontSize = 12.sp, color = Color.Gray, modifier = Modifier.weight(1f)
+        )
+        if (vue.zoom > 1.001f) {
+            TextButton(onClick = { vue.reinit() }) { Text("Recentrer", fontSize = 12.sp) }
+        }
+    }
+}
+
+/** Mini-carte du monde : pays en bleu, point rouge = capitale, noms des pays voisins en zoomant. */
 @Composable
 fun CarteMondeMini(iso3: String, modifier: Modifier = Modifier) {
     val contexte = LocalContext.current
     val geo = remember { MondeCache.obtenir(contexte) }
-    Canvas(
-        modifier
-            .fillMaxWidth()
-            .aspectRatio(geo.largeur / geo.hauteur)
-            .background(Color(0xFFF4F7FB))
-            .clipToBounds()
-    ) {
-        val k = min(size.width / geo.largeur, size.height / geo.hauteur)
-        val tx = (size.width - geo.largeur * k) / 2f
-        val ty = (size.height - geo.hauteur * k) / 2f
-        val px = 1.dp.toPx()
-        dessinerMonde(geo, k, tx, ty, px, 4.dp.toPx()) { c -> if (c == iso3) MONDE_BLEU else MONDE_PAYS }
-        geo.centres[iso3]?.let { c ->
-            drawCircle(
-                Color(0xFFD32F2F),
-                radius = 11.dp.toPx(),
-                center = Offset(tx + c.x * k, ty + c.y * k),
-                style = Stroke(width = 1.8f * px)
-            )
+    val pays = remember { PaysCache.obtenir(contexte) }
+    val noms = remember { pays.associate { it.iso3 to it.nom } }
+    val vue = remember(iso3) { VueZoom() }
+    val tm = rememberTextMeasurer()
+    val microEtat = geo.marqueurs.any { it.iso3 == iso3 }
+    Column(modifier.fillMaxWidth()) {
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(geo.largeur / geo.hauteur)
+                .background(Color(0xFFF4F7FB))
+                .clipToBounds()
+                .zoomPanMini(vue, geo.largeur, geo.hauteur, ZOOM_MAX_MONDE)
+        ) {
+            val k = min(size.width / geo.largeur, size.height / geo.hauteur) * vue.zoom
+            val tx = (size.width - geo.largeur * k) / 2f + vue.decalage.x
+            val ty = (size.height - geo.hauteur * k) / 2f + vue.decalage.y
+            val px = 1.dp.toPx()
+            dessinerMonde(geo, k, tx, ty, px, 4.dp.toPx()) { c -> if (c == iso3) MONDE_BLEU else MONDE_PAYS }
+            // noms des autres pays (celui de la fiche n'est jamais écrit : ce pourrait être la réponse)
+            if (vue.zoom >= 1.5f) {
+                geo.centres.forEach { (code, c) ->
+                    val t = geo.tailles[code]
+                    val nom = noms[code]
+                    if (code != iso3 && t != null && nom != null) {
+                        val sx = tx + c.x * k
+                        val sy = ty + c.y * k
+                        if (sx > 0f && sx < size.width && sy > 0f && sy < size.height) {
+                            etiquette(tm, listOf(nom), sx, sy, t.x * k, 10.sp, Color(0xFF263238))
+                        }
+                    }
+                }
+            }
+            geo.centres[iso3]?.let { c ->
+                if (vue.zoom < 3f) {
+                    drawCircle(
+                        Color(0xFFFF6F00), radius = 11.dp.toPx(),
+                        center = Offset(tx + c.x * k, ty + c.y * k), style = Stroke(width = 1.8f * px)
+                    )
+                }
+            }
+            if (!microEtat) {
+                geo.capitales[iso3]?.let { c ->
+                    val centre = Offset(tx + c.x * k, ty + c.y * k)
+                    drawCircle(Color.White, radius = 5.dp.toPx(), center = centre)
+                    drawCircle(Color(0xFFD32F2F), radius = 3.6f.dp.toPx(), center = centre)
+                }
+            }
         }
+        LegendeCarte(vue, "capitale")
     }
 }
 
@@ -596,12 +752,37 @@ fun QuizPays(onRetour: () -> Unit) {
     var questions by remember { mutableStateOf(listOf<QuestionPays>()) }
     var index by remember { mutableStateOf(0) }
     var reponses by remember { mutableStateOf(listOf<Boolean>()) }
+    var sauvee by remember { mutableStateOf(lirePartiePays(ctx, tous)) }
+    var confirmer by remember { mutableStateOf(false) }
+
+    // le bouton retour du téléphone demande confirmation pendant une partie
+    BackHandler(enabled = phase == 1) { confirmer = true }
 
     fun demarrer() {
         questions = genererQuestionsPays(tous, nbQuestions.toInt(), modes)
         index = 0
         reponses = emptyList()
+        effacerPartiePays(ctx)
+        sauvee = null
         phase = 1
+    }
+
+    if (confirmer) {
+        DialogQuitter(
+            onContinuer = { confirmer = false },
+            onPause = {
+                sauverPartiePays(ctx, questions, index, reponses)
+                sauvee = lirePartiePays(ctx, tous)
+                confirmer = false
+                onRetour()
+            },
+            onAbandonner = {
+                effacerPartiePays(ctx)
+                sauvee = null
+                confirmer = false
+                onRetour()
+            }
+        )
     }
 
     when (phase) {
@@ -609,7 +790,13 @@ fun QuizPays(onRetour: () -> Unit) {
             nbQuestions, { nbQuestions = it },
             modes, { modes = it },
             onDemarrer = { demarrer() },
-            onRetour = onRetour
+            partie = sauvee,
+            onReprendre = { pp ->
+                questions = pp.questions
+                index = pp.index
+                reponses = pp.reponses
+                phase = 1
+            }
         )
         1 -> EcranQuizPays(
             question = questions[index],
@@ -617,9 +804,16 @@ fun QuizPays(onRetour: () -> Unit) {
             index = index,
             onRepondu = { correct ->
                 reponses = reponses + correct
-                if (index + 1 < questions.size) index++ else phase = 2
+                if (index + 1 < questions.size) {
+                    index++
+                    sauverPartiePays(ctx, questions, index, reponses)
+                } else {
+                    effacerPartiePays(ctx)
+                    sauvee = null
+                    phase = 2
+                }
             },
-            onAbandon = onRetour
+            onAbandon = { confirmer = true }
         )
         else -> EcranResultatsPays(questions, reponses, onRef = { demarrer() }, onMenu = onRetour)
     }
@@ -632,7 +826,8 @@ fun EcranParamsPays(
     modes: List<ModePays>,
     onModes: (List<ModePays>) -> Unit,
     onDemarrer: () -> Unit,
-    onRetour: () -> Unit
+    partie: PartiePays?,
+    onReprendre: (PartiePays) -> Unit
 ) {
     Column(
         Modifier
@@ -640,7 +835,12 @@ fun EcranParamsPays(
             .verticalScroll(rememberScrollState())
             .padding(24.dp)
     ) {
-        TextButton(onClick = onRetour) { Text("← Quiz") }
+        if (partie != null) {
+            CarteReprise(
+                "Question ${partie.index + 1} / ${partie.questions.size} · ${partie.reponses.count { it }} bonne(s) réponse(s)",
+                onReprendre = { onReprendre(partie) }
+            )
+        }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.padding(20.dp)) {
                 Text("Nombre de questions", fontWeight = FontWeight.Bold)
@@ -729,7 +929,7 @@ fun EcranQuizPays(
 
         when (question.type) {
             TypeQ.CARTE -> {
-                EnonceQuestion("Localise le pays « ${p.nom} » sur la carte. (Pince pour zoomer)")
+                EnonceQuestion("Localise le pays suivant sur la carte : ${p.nom}. (Pince pour zoomer)")
                 Spacer(Modifier.height(8.dp))
                 key(question) {
                     CarteMonde(
@@ -742,7 +942,7 @@ fun EcranQuizPays(
             }
 
             TypeQ.DRAPEAU -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                EnonceQuestion("Quel est le drapeau de « ${p.nom} » ?")
+                EnonceQuestion("Quel est le drapeau du pays suivant : ${p.nom} ?")
                 Spacer(Modifier.height(8.dp))
                 question.choix.chunked(2).forEach { ligne ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -772,7 +972,7 @@ fun EcranQuizPays(
             }
 
             TypeQ.CONTINENT -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                EnonceQuestion("Sur quel continent se trouve « ${p.nom} » ?")
+                EnonceQuestion("À quel continent appartient ce pays : ${p.nom} ?")
                 Spacer(Modifier.height(8.dp))
                 CONTINENTS.forEach { c ->
                     val couleur = when {
@@ -792,6 +992,11 @@ fun EcranQuizPays(
                     ) {
                         Text(c, fontSize = 18.sp)
                     }
+                }
+                if (valide) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Localisation de ${p.nom}", fontSize = 14.sp, color = Color.Gray)
+                    CarteMondeMini(p.iso3)
                 }
             }
 
@@ -984,10 +1189,7 @@ fun EcranResultatsPays(
 @Composable
 fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onRetour) { Text("← Menu") }
-            Text("Fiches", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        }
+        Text("Fiches", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Button(onClick = onDepartements, Modifier.fillMaxWidth().height(60.dp)) {
             Text("Départements français", fontSize = 18.sp)
@@ -1005,11 +1207,11 @@ fun EcranFichesPays(onRetour: () -> Unit) {
     val tous = remember { PaysCache.obtenir(ctx) }
     var recherche by remember { mutableStateOf("") }
     var ouvert by remember { mutableStateOf<Pays?>(null) }
+    BackHandler(enabled = ouvert != null) { ouvert = null }
 
     val p = ouvert
     if (p != null) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-            TextButton(onClick = { ouvert = null }) { Text("← Fiches") }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Drapeau(p.iso2, Modifier.align(Alignment.CenterHorizontally), 110.dp)
@@ -1030,10 +1232,7 @@ fun EcranFichesPays(onRetour: () -> Unit) {
         }
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onRetour) { Text("← Fiches") }
-                Text("Pays du monde", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            }
+            Text("Pays du monde", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             TextField(
                 value = recherche,
                 onValueChange = { recherche = it },

@@ -7,6 +7,7 @@ package com.example.quizzqpuc
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -36,6 +37,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -306,6 +308,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun QuizzQpucApp() {
+    val ctx = LocalContext.current
     var ecran by remember { mutableStateOf(Ecran.MENU) }
     var categorie by remember { mutableStateOf(CATEGORIES[0]) }
 
@@ -315,62 +318,111 @@ fun QuizzQpucApp() {
     var questions by remember { mutableStateOf(listOf<Question>()) }
     var index by remember { mutableStateOf(0) }
     var reponses by remember { mutableStateOf(listOf<Boolean>()) }
+    var partieSauvee by remember { mutableStateOf(lirePartieDepts(ctx)) }
+    var confirmerQuitter by remember { mutableStateOf(false) }
 
     fun demarrer() {
         questions = genererQuestions(nbQuestions.toInt(), modesActifs)
         index = 0
         reponses = emptyList()
+        effacerPartieDepts(ctx)
+        partieSauvee = null
         ecran = Ecran.QUIZ
+    }
+
+    // Bouton retour du téléphone : remonte d'un écran ; pendant une partie, demande confirmation.
+    BackHandler(enabled = ecran != Ecran.MENU) {
+        when (ecran) {
+            Ecran.QUIZ -> confirmerQuitter = true
+            Ecran.LISTE_QUIZ, Ecran.FICHES_CHOIX -> ecran = Ecran.MENU
+            Ecran.PARAMS, Ecran.RESULTATS -> ecran = Ecran.LISTE_QUIZ
+            Ecran.FICHES, Ecran.FICHES_PAYS -> ecran = Ecran.FICHES_CHOIX
+            Ecran.MENU -> {}
+        }
     }
 
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
-            when (ecran) {
-                Ecran.MENU -> EcranMenu(
-                    onJouer = { ecran = Ecran.LISTE_QUIZ },
-                    onFiches = { ecran = Ecran.FICHES_CHOIX }
-                )
-                Ecran.LISTE_QUIZ -> EcranListeQuiz(
-                    onRetour = { ecran = Ecran.MENU },
-                    onChoix = { c ->
-                        categorie = c
-                        if (c.dispo) ecran = Ecran.PARAMS
-                    }
-                )
-                Ecran.PARAMS -> when (categorie.id) {
-                    "departements" -> EcranParamsDepartements(
-                        nbQuestions,
-                        { nbQuestions = it },
-                        modesActifs,
-                        { modesActifs = it },
-                        onDemarrer = { demarrer() }
+            // marges : les boutons ne passent plus sous la barre de navigation ni sous le clavier
+            Box(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
+                when (ecran) {
+                    Ecran.MENU -> EcranMenu(
+                        onJouer = { ecran = Ecran.LISTE_QUIZ },
+                        onFiches = { ecran = Ecran.FICHES_CHOIX }
                     )
-                    "pays" -> QuizPays(onRetour = { ecran = Ecran.LISTE_QUIZ })
-                    else -> {}
+                    Ecran.LISTE_QUIZ -> EcranListeQuiz(
+                        onRetour = { ecran = Ecran.MENU },
+                        onChoix = { c ->
+                            categorie = c
+                            if (c.dispo) ecran = Ecran.PARAMS
+                        }
+                    )
+                    Ecran.PARAMS -> when (categorie.id) {
+                        "departements" -> EcranParamsDepartements(
+                            nbQuestions,
+                            { nbQuestions = it },
+                            modesActifs,
+                            { modesActifs = it },
+                            onDemarrer = { demarrer() },
+                            partie = partieSauvee,
+                            onReprendre = { p ->
+                                questions = p.questions
+                                index = p.index
+                                reponses = p.reponses
+                                ecran = Ecran.QUIZ
+                            }
+                        )
+                        "pays" -> QuizPays(onRetour = { ecran = Ecran.LISTE_QUIZ })
+                        else -> {}
+                    }
+                    Ecran.QUIZ -> EcranQuiz(
+                        question = questions[index],
+                        total = questions.size,
+                        index = index,
+                        onRepondu = { correct ->
+                            reponses = reponses + correct
+                            if (index + 1 < questions.size) {
+                                index++
+                                sauverPartieDepts(ctx, questions, index, reponses)
+                            } else {
+                                effacerPartieDepts(ctx)
+                                partieSauvee = null
+                                ecran = Ecran.RESULTATS
+                            }
+                        },
+                        onAbandon = { confirmerQuitter = true }
+                    )
+                    Ecran.RESULTATS -> EcranResultats(
+                        questions, reponses,
+                        onRef = { demarrer() },
+                        onMenu = { ecran = Ecran.LISTE_QUIZ }
+                    )
+                    Ecran.FICHES_CHOIX -> EcranChoixFiches(
+                        onRetour = { ecran = Ecran.MENU },
+                        onDepartements = { ecran = Ecran.FICHES },
+                        onPays = { ecran = Ecran.FICHES_PAYS }
+                    )
+                    Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.FICHES_CHOIX })
+                    Ecran.FICHES_PAYS -> EcranFichesPays(onRetour = { ecran = Ecran.FICHES_CHOIX })
                 }
-                Ecran.QUIZ -> EcranQuiz(
-                    question = questions[index],
-                    total = questions.size,
-                    index = index,
-                    onRepondu = { correct ->
-                        reponses = reponses + correct
-                        if (index + 1 < questions.size) index++ else ecran = Ecran.RESULTATS
-                    },
-                    onAbandon = { ecran = Ecran.LISTE_QUIZ }
-                )
-                Ecran.RESULTATS -> EcranResultats(
-                    questions, reponses,
-                    onRef = { demarrer() },
-                    onMenu = { ecran = Ecran.LISTE_QUIZ }
-                )
-                Ecran.FICHES_CHOIX -> EcranChoixFiches(
-                    onRetour = { ecran = Ecran.MENU },
-                    onDepartements = { ecran = Ecran.FICHES },
-                    onPays = { ecran = Ecran.FICHES_PAYS }
-                )
-                Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.FICHES_CHOIX })
-                Ecran.FICHES_PAYS -> EcranFichesPays(onRetour = { ecran = Ecran.FICHES_CHOIX })
             }
+        }
+        if (confirmerQuitter) {
+            DialogQuitter(
+                onContinuer = { confirmerQuitter = false },
+                onPause = {
+                    sauverPartieDepts(ctx, questions, index, reponses)
+                    partieSauvee = lirePartieDepts(ctx)
+                    confirmerQuitter = false
+                    ecran = Ecran.LISTE_QUIZ
+                },
+                onAbandonner = {
+                    effacerPartieDepts(ctx)
+                    partieSauvee = null
+                    confirmerQuitter = false
+                    ecran = Ecran.LISTE_QUIZ
+                }
+            )
         }
     }
 }
@@ -404,10 +456,7 @@ fun EcranMenu(onJouer: () -> Unit, onFiches: () -> Unit) {
 @Composable
 fun EcranListeQuiz(onRetour: () -> Unit, onChoix: (Categorie) -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onRetour) { Text("← Menu") }
-            Text("Choisis un quiz", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        }
+        Text("Choisis un quiz", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         CATEGORIES.filter { it.dispo }.forEach { c ->
             Button(
@@ -487,7 +536,9 @@ fun EcranParamsDepartements(
     onNbQuestions: (Float) -> Unit,
     modesActifs: List<Mode>,
     onModesActifs: (List<Mode>) -> Unit,
-    onDemarrer: () -> Unit
+    onDemarrer: () -> Unit,
+    partie: PartieDepts? = null,
+    onReprendre: (PartieDepts) -> Unit = {}
 ) {
     Column(
         Modifier
@@ -495,6 +546,12 @@ fun EcranParamsDepartements(
             .verticalScroll(rememberScrollState())
             .padding(24.dp)
     ) {
+        if (partie != null) {
+            CarteReprise(
+                "Question ${partie.index + 1} / ${partie.questions.size} · ${partie.reponses.count { it }} bonne(s) réponse(s)",
+                onReprendre = { onReprendre(partie) }
+            )
+        }
         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.padding(20.dp)) {
                 Text("Nombre de questions", fontWeight = FontWeight.Bold)
@@ -890,6 +947,7 @@ class FormeDept(val numero: String, val anneaux: List<FloatArray>) {
         minX = x0; minY = y0; maxX = x1; maxY = y1
     }
 
+    val largeurBoite: Float get() = maxX - minX
     val centreX: Float get() = (minX + maxX) / 2f
     val centreY: Float get() = (minY + maxY) / 2f
 
@@ -917,7 +975,8 @@ class CarteGeo(
     val largeur: Float,
     val hauteur: Float,
     val departements: List<FormeDept>,
-    val contoursRegions: Path
+    val contoursRegions: Path,
+    val chefsLieux: Map<String, Offset> = emptyMap()
 )
 
 fun ajouterAnneau(chemin: Path, a: FloatArray) {
@@ -960,7 +1019,15 @@ fun chargerCarte(ctx: Context): CarteGeo {
     val contours = Path()
     val r = racine.getJSONArray("r")
     for (i in 0 until r.length()) ajouterAnneau(contours, lireAnneau(r.getJSONArray(i)))
-    return CarteGeo(racine.getInt("w").toFloat(), racine.getInt("h").toFloat(), formes, contours)
+    val chefs = HashMap<String, Offset>()
+    val cl = racine.optJSONArray("cl")
+    if (cl != null) {
+        for (i in 0 until cl.length()) {
+            val e = cl.getJSONArray(i)
+            chefs[e.getString(0)] = Offset(e.getInt(1).toFloat(), e.getInt(2).toFloat())
+        }
+    }
+    return CarteGeo(racine.getInt("w").toFloat(), racine.getInt("h").toFloat(), formes, contours, chefs)
 }
 
 /** La carte n'est lue qu'une fois, puis gardée en mémoire. */
@@ -1082,28 +1149,65 @@ private fun DrawScope.dessinerCarte(
     }
 }
 
-/** Petite carte non interactive : le département `numero` est en bleu, entouré d'un cercle rouge. */
+/**
+ * Mini-carte de la fiche : département en bleu, point rouge = chef-lieu,
+ * zoom (pincer) et déplacement, numéros / noms des départements voisins en zoomant.
+ */
 @Composable
 fun CarteFranceMini(numero: String, modifier: Modifier = Modifier) {
     val contexte = LocalContext.current
     val geo = remember { CarteCache.obtenir(contexte) }
-    Canvas(modifier.fillMaxWidth().height(200.dp).clipToBounds()) {
-        val k = min(size.width / geo.largeur, size.height / geo.hauteur)
-        val tx = (size.width - geo.largeur * k) / 2f
-        val ty = (size.height - geo.hauteur * k) / 2f
-        val px = 1.dp.toPx()
-        dessinerCarte(geo, k, tx, ty, 0.5f * px, 1.1f * px) { n ->
-            if (n == numero) BLEU_CHOIX else GRIS_DEPT
+    val noms = remember { DEPARTEMENTS.associate { it.numero to it.nom } }
+    val vue = remember(numero) { VueZoom() }
+    val tm = rememberTextMeasurer()
+    Column(modifier.fillMaxWidth()) {
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(240.dp)
+                .clipToBounds()
+                .zoomPanMini(vue, geo.largeur, geo.hauteur, ZOOM_MAX)
+        ) {
+            val k = min(size.width / geo.largeur, size.height / geo.hauteur) * vue.zoom
+            val tx = (size.width - geo.largeur * k) / 2f + vue.decalage.x
+            val ty = (size.height - geo.hauteur * k) / 2f + vue.decalage.y
+            val px = 1.dp.toPx()
+            dessinerCarte(geo, k, tx, ty, 0.5f * px, 1.1f * px) { n ->
+                if (n == numero) BLEU_CHOIX else GRIS_DEPT
+            }
+            // numéros / noms des voisins (celui de la fiche n'est jamais écrit : ce pourrait être la réponse)
+            if (vue.zoom >= 2f) {
+                geo.departements.forEach { d ->
+                    if (d.numero != numero) {
+                        val sx = tx + d.centreX * k
+                        val sy = ty + d.centreY * k
+                        if (sx > 0f && sx < size.width && sy > 0f && sy < size.height) {
+                            etiquette(
+                                tm, listOf(noms[d.numero] ?: d.numero, d.numero),
+                                sx, sy, d.largeurBoite * k, 9.sp, Color(0xFF263238)
+                            )
+                        }
+                    }
+                }
+            }
+            // le cercle aide à repérer les petits départements (Paris, Hauts-de-Seine...)
+            geo.departements.firstOrNull { it.numero == numero }?.let { d ->
+                if (vue.zoom < 3f) {
+                    drawCircle(
+                        Color(0xFFFF6F00),
+                        radius = 10.dp.toPx(),
+                        center = Offset(tx + d.centreX * k, ty + d.centreY * k),
+                        style = Stroke(width = 1.8f * px)
+                    )
+                }
+            }
+            geo.chefsLieux[numero]?.let { c ->
+                val centre = Offset(tx + c.x * k, ty + c.y * k)
+                drawCircle(Color.White, radius = 5.dp.toPx(), center = centre)
+                drawCircle(Color(0xFFD32F2F), radius = 3.6f.dp.toPx(), center = centre)
+            }
         }
-        // le cercle aide à repérer les petits départements (Paris, Hauts-de-Seine...)
-        geo.departements.firstOrNull { it.numero == numero }?.let { d ->
-            drawCircle(
-                Color(0xFFD32F2F),
-                radius = 10.dp.toPx(),
-                center = Offset(tx + d.centreX * k, ty + d.centreY * k),
-                style = Stroke(width = 1.8f * px)
-            )
-        }
+        LegendeCarte(vue, "chef-lieu")
     }
 }
 
@@ -1199,13 +1303,11 @@ fun EcranResultats(
 fun EcranFiches(onRetour: () -> Unit) {
     var recherche by remember { mutableStateOf("") }
     var deptOuvert by remember { mutableStateOf<Departement?>(null) }
+    BackHandler(enabled = deptOuvert != null) { deptOuvert = null }
 
     val d = deptOuvert
     if (d != null) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { deptOuvert = null }) { Text("← Fiches") }
-            }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     if (d.imageUrl != null) ImageUrl(d.imageUrl, "Illustration")
@@ -1230,10 +1332,7 @@ fun EcranFiches(onRetour: () -> Unit) {
         }
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onRetour) { Text("← Menu") }
-                Text("Fiches", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            }
+            Text("Fiches : départements", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             TextField(
                 value = recherche,
                 onValueChange = { recherche = it },
