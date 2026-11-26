@@ -46,6 +46,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 
 // ----------------------------------------------------------------------------
@@ -955,6 +956,7 @@ class FormeDept(val numero: String, val anneaux: List<FloatArray>) {
     }
 
     val largeurBoite: Float get() = maxX - minX
+    val hauteurBoite: Float get() = maxY - minY
     val centreX: Float get() = (minX + maxX) / 2f
     val centreY: Float get() = (minY + maxY) / 2f
 
@@ -1211,13 +1213,17 @@ fun CarteRegionMini(
                     }
                 }
             }
-            // le cercle aide à repérer les petits départements (Paris, Hauts-de-Seine...)
+            // l'ovale entoure toute la région (petits comme grands) pour la repérer d'un coup d'œil
             geo.departements.firstOrNull { it.numero == numero }?.let { d ->
                 if (vue.zoom < 3f) {
-                    drawCircle(
+                    val marge = 4.dp.toPx()
+                    val demiL = d.largeurBoite * k / 2f * 1.4143f + marge
+                    val demiH = d.hauteurBoite * k / 2f * 1.4143f + marge
+                    val c = Offset(tx + d.centreX * k, ty + d.centreY * k)
+                    drawOval(
                         Color(0xFFFF6F00),
-                        radius = 10.dp.toPx(),
-                        center = Offset(tx + d.centreX * k, ty + d.centreY * k),
+                        topLeft = Offset(c.x - max(demiL, 10.dp.toPx()), c.y - max(demiH, 10.dp.toPx())),
+                        size = androidx.compose.ui.geometry.Size(2f * max(demiL, 10.dp.toPx()), 2f * max(demiH, 10.dp.toPx())),
                         style = Stroke(width = 1.8f * px)
                     )
                 }
