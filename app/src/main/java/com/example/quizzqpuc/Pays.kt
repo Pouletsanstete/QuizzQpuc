@@ -1188,7 +1188,7 @@ fun EcranResultatsPays(
 // ----------------------------------------------------------------------------
 
 @Composable
-fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: () -> Unit, onEtats: () -> Unit) {
+fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: () -> Unit, onEtats: () -> Unit, onElements: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("Fiches", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
@@ -1202,6 +1202,10 @@ fun EcranChoixFiches(onRetour: () -> Unit, onDepartements: () -> Unit, onPays: (
         Spacer(Modifier.height(12.dp))
         Button(onClick = onEtats, Modifier.fillMaxWidth().height(60.dp)) {
             Text("États américains", fontSize = 18.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onElements, Modifier.fillMaxWidth().height(60.dp)) {
+            Text("Tableau périodique", fontSize = 18.sp)
         }
     }
 }
