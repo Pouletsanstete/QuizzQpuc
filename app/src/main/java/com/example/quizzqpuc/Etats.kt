@@ -41,7 +41,6 @@ data class Etat(
     val capitale: String,
     val capitalesAcceptees: List<String>,
     val surnoms: List<String>,
-    val annee: Int,
     val nfl: List<Equipe>,
     val mlb: List<Equipe>,
     val nba: List<Equipe>,
@@ -71,7 +70,6 @@ fun chargerEtats(ctx: Context): List<Etat> {
             capitale = o.getString("c"),
             capitalesAcceptees = o.optJSONArray("ca").textes(),
             surnoms = o.getJSONArray("s").textes(),
-            annee = o.getInt("y"),
             nfl = o.optJSONArray("nfl").equipes(),
             mlb = o.optJSONArray("mlb").equipes(),
             nba = o.optJSONArray("nba").equipes(),
@@ -94,7 +92,6 @@ enum class ModeEtat(val label: String, val libelleChamp: String, val nom: String
     CAPITALE("Capitale", "Capitale", "Capitale", true),
     ABREVIATION("Abréviation (ex : TX)", "Abréviation\n(2 lettres, ex : TX)", "Abréviation", true),
     SURNOM("Surnom (ex : Lone Star State)", "Surnom\n(un seul, en anglais)", "Surnom", true),
-    ANNEE("Année d'entrée dans l'Union", "Année d'entrée\ndans l'Union", "Année d'entrée dans l'Union", true),
     NFL("Équipes NFL (football américain)", "Équipes NFL", "Équipes NFL", true),
     MLB("Équipes MLB (baseball)", "Équipes MLB", "Équipes MLB", true),
     NBA("Équipes NBA (basket)", "Équipes NBA", "Équipes NBA", true),
@@ -165,7 +162,6 @@ fun valeurEtat(e: Etat, m: ModeEtat): String = when (m) {
     ModeEtat.CAPITALE -> e.capitale
     ModeEtat.ABREVIATION -> e.code
     ModeEtat.SURNOM -> e.surnoms.joinToString(" / ")
-    ModeEtat.ANNEE -> e.annee.toString()
     ModeEtat.NFL, ModeEtat.MLB, ModeEtat.NBA, ModeEtat.NHL ->
         equipesDe(e, m).let { l -> if (l.isEmpty()) "Aucune" else l.joinToString(", ") { it.nom } }
     else -> ""
@@ -176,7 +172,6 @@ fun champJusteEtat(e: Etat, m: ModeEtat, reponse: String): Boolean = when (m) {
     ModeEtat.CAPITALE -> (listOf(e.capitale) + e.capitalesAcceptees).any { correspondA(reponse, it) }
     ModeEtat.ABREVIATION -> normaliser(reponse) == normaliser(e.code)
     ModeEtat.SURNOM -> e.surnoms.any { s -> variantesSurnom(s).any { correspondA(reponse, it) } }
-    ModeEtat.ANNEE -> reponse.filter { it.isDigit() }.toIntOrNull() == e.annee
     ModeEtat.NFL, ModeEtat.MLB, ModeEtat.NBA, ModeEtat.NHL -> {
         val equipes = equipesDe(e, m)
         val (ok, faux) = evaluerListe(equipes.map { it.variantes }, decouperListe(reponse.replace(" et ", ",")))
@@ -458,7 +453,7 @@ fun EcranQuizEtats(
                             }
                             Spacer(Modifier.height(12.dp))
                             Text("Localisation", fontSize = 14.sp, color = Color.Gray)
-                            CarteRegionMini(CARTE_USA, e.code, EtatsCache.obtenir(LocalContext.current).associate { it.code to it.nom }, "capitale")
+                            CarteRegionMini(CARTE_USA, e.code, EtatsCache.obtenir(LocalContext.current).associate { it.code to it.nom }, "Capitale")
                         }
                     }
                 }
@@ -610,7 +605,16 @@ fun EcranFichesEtats() {
 
     val e = ouvert
     if (e != null) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .balayageFiches(
+                    onSuivante = { ouvert = voisine(tous, e, 1) },
+                    onPrecedente = { ouvert = voisine(tous, e, -1) }
+                )
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Drapeau(e.iso2, Modifier.align(Alignment.CenterHorizontally), 110.dp)
@@ -620,16 +624,16 @@ fun EcranFichesEtats() {
                     Text("Abréviation : ${e.code}", fontSize = 15.sp)
                     Text("Capitale : ${e.capitale}", fontSize = 15.sp)
                     Text("Surnom : ${valeurEtat(e, ModeEtat.SURNOM)}", fontSize = 15.sp)
-                    Text("Entrée dans l'Union : ${e.annee}", fontSize = 15.sp)
                     Spacer(Modifier.height(8.dp))
                     listOf(ModeEtat.NFL, ModeEtat.MLB, ModeEtat.NBA, ModeEtat.NHL).forEach {
                         Text("${it.nom} : ${valeurEtat(e, it)}", fontSize = 15.sp)
                     }
                     Spacer(Modifier.height(12.dp))
                     Text("Localisation", fontSize = 14.sp, color = Color.Gray)
-                    CarteRegionMini(CARTE_USA, e.code, noms, "capitale")
+                    CarteRegionMini(CARTE_USA, e.code, noms, "Capitale")
                 }
             }
+            PiedFiche(onAleatoire = { ouvert = tous.random() })
         }
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -647,7 +651,7 @@ fun EcranFichesEtats() {
                 q.isEmpty() || normaliser(it.nom).contains(q) || normaliser(it.capitale).contains(q) ||
                     normaliser(it.code) == q || it.nomsAcceptes.any { n -> normaliser(n).contains(q) }
             }
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.weight(1f)) {
                 items(filtres) { et ->
                     Card(
                         modifier = Modifier
@@ -660,12 +664,14 @@ fun EcranFichesEtats() {
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(et.nom, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                                Text("${et.code} · capitale : ${et.capitale}", fontSize = 13.sp, color = Color.Gray)
+                                Text("${et.code}\nCapitale : ${et.capitale}", fontSize = 13.sp, color = Color.Gray)
                             }
                         }
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { ouvert = tous.random() }, Modifier.fillMaxWidth().height(52.dp)) { Text("Fiche aléatoire") }
         }
     }
 }

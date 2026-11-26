@@ -1161,7 +1161,7 @@ private fun DrawScope.dessinerCarte(
 @Composable
 fun CarteFranceMini(numero: String, modifier: Modifier = Modifier) {
     val noms = remember { DEPARTEMENTS.associate { it.numero to it.nom } }
-    CarteRegionMini("carte_france.json", numero, noms, "chef-lieu", modifier)
+    CarteRegionMini("carte_france.json", numero, noms, "Chef-lieu", modifier)
 }
 
 /** Mini-carte générique (départements français, États américains...) : voir CarteFranceMini. */
@@ -1324,7 +1324,16 @@ fun EcranFiches(onRetour: () -> Unit) {
 
     val d = deptOuvert
     if (d != null) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .balayageFiches(
+                    onSuivante = { deptOuvert = voisine(DEPARTEMENTS, d, 1) },
+                    onPrecedente = { deptOuvert = voisine(DEPARTEMENTS, d, -1) }
+                )
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     if (d.imageUrl != null) ImageUrl(d.imageUrl, "Illustration")
@@ -1346,6 +1355,7 @@ fun EcranFiches(onRetour: () -> Unit) {
                     CarteFranceMini(d.numero)
                 }
             }
+            PiedFiche(onAleatoire = { deptOuvert = DEPARTEMENTS.random() })
         }
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -1363,7 +1373,7 @@ fun EcranFiches(onRetour: () -> Unit) {
                     it.numero.contains(recherche) ||
                     (REGION_Noms[it.region]?.contains(recherche, ignoreCase = true) == true)
             }
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.weight(1f)) {
                 items(filtres) { dep ->
                     Card(
                         modifier = Modifier
@@ -1373,11 +1383,13 @@ fun EcranFiches(onRetour: () -> Unit) {
                     ) {
                         Column(Modifier.padding(12.dp)) {
                             Text("${dep.numero} - ${dep.nom}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                            Text("${REGION_Noms[dep.region] ?: dep.region} · chef-lieu : ${dep.chefLieu}", fontSize = 13.sp, color = Color.Gray)
+                            Text("${REGION_Noms[dep.region] ?: dep.region}\nChef-lieu : ${dep.chefLieu}", fontSize = 13.sp, color = Color.Gray)
                         }
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { deptOuvert = DEPARTEMENTS.random() }, Modifier.fillMaxWidth().height(52.dp)) { Text("Fiche aléatoire") }
         }
     }
 }
