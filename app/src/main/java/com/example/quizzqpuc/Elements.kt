@@ -21,7 +21,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -42,6 +44,8 @@ private const val CARTE_TABLEAU = "carte_tableau.json"
 data class Element(
     val z: Int,
     val nom: String,
+    val nomEn: String,
+    val isotopes: List<String>,
     val nomsAcceptes: List<String>,
     val symbole: String,
     val masse: Double,
@@ -91,6 +95,8 @@ fun chargerElements(ctx: Context): List<Element> {
         Element(
             z = o.getInt("z"),
             nom = o.getString("n"),
+            nomEn = o.optString("en", ""),
+            isotopes = o.optJSONArray("i").textes(),
             nomsAcceptes = o.optJSONArray("na").textes(),
             symbole = o.getString("s"),
             masse = o.getDouble("m"),
@@ -202,7 +208,7 @@ fun masseJuste(reponse: String, e: Element): Boolean {
 }
 
 fun champJusteElem(e: Element, m: ModeElem, reponse: String): Boolean = when (m) {
-    ModeElem.NOM -> (listOf(e.nom) + e.nomsAcceptes).any { correspondA(reponse, it) }
+    ModeElem.NOM -> (listOf(e.nom, e.nomEn) + e.nomsAcceptes).filter { it.isNotEmpty() }.any { correspondA(reponse, it) }
     ModeElem.SYMBOLE -> normaliser(reponse) == normaliser(e.symbole)
     ModeElem.NUMERO -> reponse.filter { it.isDigit() }.toIntOrNull() == e.z
     ModeElem.MASSE -> masseJuste(reponse, e)
@@ -441,7 +447,6 @@ fun EcranQuizElem(
                 }
                 if (valide) {
                     Spacer(Modifier.height(12.dp))
-                    Text("Place dans le tableau", fontSize = 14.sp, color = Color.Gray)
                     TableauMini(e.symbole)
                 }
             }
@@ -634,44 +639,29 @@ fun TableauMini(symbole: String, modifier: Modifier = Modifier) {
     val geo = remember { CarteCache.obtenir(contexte, CARTE_TABLEAU) }
     val elements = remember { ElementsCache.obtenir(contexte) }
     val couleurs = remember { elements.associate { it.symbole to (COULEURS_FAMILLES[it.famille] ?: Color.LightGray) } }
-    val vue = remember(symbole) { VueZoom() }
     val tm = rememberTextMeasurer()
-    Column(modifier.fillMaxWidth()) {
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(geo.largeur / geo.hauteur)
-                .clipToBounds()
-                .zoomPanMini(vue, geo.largeur, geo.hauteur, 8f)
-        ) {
-            val k = min(size.width / geo.largeur, size.height / geo.hauteur) * vue.zoom
-            val tx = (size.width - geo.largeur * k) / 2f + vue.decalage.x
-            val ty = (size.height - geo.hauteur * k) / 2f + vue.decalage.y
-            val px = 1.dp.toPx()
-            dessinerCarte(geo, k, tx, ty, 0.4f * px, 1.2f * px) { c ->
-                if (c == symbole) Color(0xFF42A5F5) else couleurs[c] ?: Color.LightGray
-            }
-            geo.departements.forEach { f ->
-                val w = f.largeurBoite * k
-                val sx = tx + f.centreX * k
-                val sy = ty + f.centreY * k
-                if (sx > 0f && sx < size.width && sy > 0f && sy < size.height) {
-                    etiquette(tm, listOf(f.numero), sx, sy, w, (w * 0.42f).toSp(), Color(0xFF212121))
-                }
-            }
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .aspectRatio(geo.largeur / geo.hauteur)
+    ) {
+        val k = min(size.width / geo.largeur, size.height / geo.hauteur)
+        val tx = (size.width - geo.largeur * k) / 2f
+        val ty = (size.height - geo.hauteur * k) / 2f
+        val px = 1.dp.toPx()
+        dessinerCarte(geo, k, tx, ty, 0.4f * px, 0f) { c -> couleurs[c] ?: Color.LightGray }
+        geo.departements.forEach { f ->
+            val w = f.largeurBoite * k
+            etiquette(tm, listOf(f.numero), tx + f.centreX * k, ty + f.centreY * k, w, (w * 0.42f).toSp(), Color(0xFF212121))
         }
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                "Case bleue = l'élément · Pince pour zoomer, glisse pour te déplacer",
-                fontSize = 12.sp, color = Color.Gray, modifier = Modifier.weight(1f)
+        // l'élément de la fiche est entouré en rouge
+        geo.departements.firstOrNull { it.numero == symbole }?.let { f ->
+            drawRect(
+                Color(0xFFD32F2F),
+                topLeft = Offset(tx + (f.centreX - f.largeurBoite / 2f) * k, ty + (f.centreY - f.hauteurBoite / 2f) * k),
+                size = androidx.compose.ui.geometry.Size(f.largeurBoite * k, f.hauteurBoite * k),
+                style = Stroke(width = 2.5f * px)
             )
-            if (vue.zoom > 1.001f) {
-                TextButton(onClick = { vue.reinit() }) { Text("Recentrer", fontSize = 12.sp) }
-            }
         }
     }
 }
@@ -703,6 +693,7 @@ fun EcranFichesElem() {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("${e.nom} (${e.symbole})", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("En anglais : ${e.nomEn}", fontSize = 15.sp, color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
                     Text("Numéro atomique : ${e.z}", fontSize = 15.sp)
                     Text(
@@ -713,9 +704,15 @@ fun EcranFichesElem() {
                     Text("Période : ${e.periode}", fontSize = 15.sp)
                     Text("Groupe : ${valeurElem(e, ModeElem.GROUPE)}", fontSize = 15.sp)
                     if (e.etat.isNotEmpty()) Text("État à 25 °C : ${valeurElem(e, ModeElem.ETAT)}", fontSize = 15.sp)
+                    if (e.isotopes.isNotEmpty()) {
+                        Text(
+                            (if (e.isotopes.first().contains("demi-vie")) "Isotope le plus stable : " else "Isotopes naturels : ") +
+                                e.isotopes.joinToString(", "),
+                            fontSize = 15.sp
+                        )
+                    }
                     if (e.config.isNotEmpty()) Text("Configuration électronique : ${e.config}", fontSize = 15.sp)
                     Spacer(Modifier.height(12.dp))
-                    Text("Place dans le tableau", fontSize = 14.sp, color = Color.Gray)
                     TableauMini(e.symbole)
                 }
             }
@@ -734,7 +731,7 @@ fun EcranFichesElem() {
             Spacer(Modifier.height(8.dp))
             val q = normaliser(recherche)
             val filtres = tous.filter {
-                q.isEmpty() || normaliser(it.nom).contains(q) || normaliser(it.symbole) == q ||
+                q.isEmpty() || normaliser(it.nom).contains(q) || normaliser(it.nomEn).contains(q) || normaliser(it.symbole) == q ||
                     it.z.toString() == recherche.trim() || it.nomsAcceptes.any { n -> normaliser(n).contains(q) }
             }
             LazyColumn(Modifier.weight(1f)) {
