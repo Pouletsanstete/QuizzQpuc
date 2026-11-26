@@ -18,6 +18,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -670,7 +671,7 @@ fun LegendeCarte(vue: VueZoom, repere: String) {
         Text(
             buildAnnotatedString {
                 withStyle(SpanStyle(color = Color(0xFFD32F2F))) { append("●") }
-                append(" $repere · pince pour zoomer, glisse pour te déplacer")
+                append(" $repere · Pince pour zoomer, glisse pour te déplacer")
             },
             fontSize = 12.sp, color = Color.Gray, modifier = Modifier.weight(1f)
         )
@@ -1215,7 +1216,16 @@ fun EcranFichesPays(onRetour: () -> Unit) {
 
     val p = ouvert
     if (p != null) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .balayageFiches(
+                    onSuivante = { ouvert = voisine(tous, p, 1) },
+                    onPrecedente = { ouvert = voisine(tous, p, -1) }
+                )
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Drapeau(p.iso2, Modifier.align(Alignment.CenterHorizontally), 110.dp)
@@ -1233,6 +1243,7 @@ fun EcranFichesPays(onRetour: () -> Unit) {
                     CarteMondeMini(p.iso3)
                 }
             }
+            PiedFiche(onAleatoire = { ouvert = tous.random() })
         }
     } else {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -1251,7 +1262,7 @@ fun EcranFichesPays(onRetour: () -> Unit) {
                     it.capitales.any { c -> normaliser(c).contains(q) } ||
                     it.nomsAcceptes.any { n -> normaliser(n).contains(q) }
             }
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.weight(1f)) {
                 items(filtres) { pays ->
                     Card(
                         modifier = Modifier
@@ -1265,7 +1276,7 @@ fun EcranFichesPays(onRetour: () -> Unit) {
                             Column {
                                 Text(pays.nom, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "${pays.continent} · capitale : ${pays.capitales.joinToString(", ")}",
+                                    "${pays.continent}\nCapitale : ${pays.capitales.joinToString(", ")}",
                                     fontSize = 13.sp, color = Color.Gray
                                 )
                             }
@@ -1273,6 +1284,46 @@ fun EcranFichesPays(onRetour: () -> Unit) {
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { ouvert = tous.random() }, Modifier.fillMaxWidth().height(52.dp)) { Text("Fiche aléatoire") }
         }
     }
+}
+
+// ----------------------------------------------------------------------------
+// NAVIGATION ENTRE FICHES : balayage + fiche aléatoire
+// ----------------------------------------------------------------------------
+
+/** Fiche voisine dans la liste (circulaire) : delta = +1 suivante, -1 précédente. */
+fun <T> voisine(liste: List<T>, courante: T, delta: Int): T {
+    val i = liste.indexOf(courante)
+    if (i < 0 || liste.isEmpty()) return courante
+    return liste[(i + delta + liste.size) % liste.size]
+}
+
+/** Balayage horizontal sur une fiche : vers la droite = fiche suivante, vers la gauche = précédente. */
+fun Modifier.balayageFiches(onSuivante: () -> Unit, onPrecedente: () -> Unit): Modifier =
+    this.pointerInput(onSuivante, onPrecedente) {
+        var total = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { total = 0f },
+            onDragEnd = {
+                if (total > 140f) onSuivante() else if (total < -140f) onPrecedente()
+                total = 0f
+            },
+            onDragCancel = { total = 0f },
+            onHorizontalDrag = { _, dx -> total += dx }
+        )
+    }
+
+@Composable
+fun PiedFiche(onAleatoire: () -> Unit) {
+    Spacer(Modifier.height(12.dp))
+    Text(
+        "Glisse vers la droite : fiche suivante · vers la gauche : fiche précédente",
+        fontSize = 12.sp, color = Color.Gray
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(onClick = onAleatoire, Modifier.fillMaxWidth().height(52.dp)) { Text("Fiche aléatoire") }
+    Spacer(Modifier.height(16.dp))
 }
