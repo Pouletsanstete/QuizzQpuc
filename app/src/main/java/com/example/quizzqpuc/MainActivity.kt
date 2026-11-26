@@ -277,7 +277,7 @@ enum class Mode(val label: String, val libelleChamp: String, val nom: String) {
     LOCALISATION("La localisation (carte)", "Localisation", "Localisation")
 }
 
-enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES_CHOIX, FICHES, FICHES_PAYS, FICHES_ETATS }
+enum class Ecran { MENU, LISTE_QUIZ, PARAMS, QUIZ, RESULTATS, FICHES_CHOIX, FICHES, FICHES_PAYS, FICHES_ETATS, FICHES_ELEMENTS }
 
 data class Question(
     val dept: Departement,
@@ -290,7 +290,8 @@ val CATEGORIES = listOf(
     Categorie("departements", "Départements français", true),
     Categorie("pays", "Pays du monde", true),
     Categorie("rois", "Rois de France", false),
-    Categorie("usa", "États américains", true)
+    Categorie("usa", "États américains", true),
+    Categorie("elements", "Tableau périodique", true)
 )
 
 data class Categorie(val id: String, val titre: String, val dispo: Boolean)
@@ -336,7 +337,7 @@ fun QuizzQpucApp() {
             Ecran.QUIZ -> confirmerQuitter = true
             Ecran.LISTE_QUIZ, Ecran.FICHES_CHOIX -> ecran = Ecran.MENU
             Ecran.PARAMS, Ecran.RESULTATS -> ecran = Ecran.LISTE_QUIZ
-            Ecran.FICHES, Ecran.FICHES_PAYS, Ecran.FICHES_ETATS -> ecran = Ecran.FICHES_CHOIX
+            Ecran.FICHES, Ecran.FICHES_PAYS, Ecran.FICHES_ETATS, Ecran.FICHES_ELEMENTS -> ecran = Ecran.FICHES_CHOIX
             Ecran.MENU -> {}
         }
     }
@@ -374,6 +375,7 @@ fun QuizzQpucApp() {
                         )
                         "pays" -> QuizPays(onRetour = { ecran = Ecran.LISTE_QUIZ })
                         "usa" -> QuizEtats(onRetour = { ecran = Ecran.LISTE_QUIZ })
+                        "elements" -> QuizElements(onRetour = { ecran = Ecran.LISTE_QUIZ })
                         else -> {}
                     }
                     Ecran.QUIZ -> EcranQuiz(
@@ -402,11 +404,13 @@ fun QuizzQpucApp() {
                         onRetour = { ecran = Ecran.MENU },
                         onDepartements = { ecran = Ecran.FICHES },
                         onPays = { ecran = Ecran.FICHES_PAYS },
-                        onEtats = { ecran = Ecran.FICHES_ETATS }
+                        onEtats = { ecran = Ecran.FICHES_ETATS },
+                        onElements = { ecran = Ecran.FICHES_ELEMENTS }
                     )
                     Ecran.FICHES -> EcranFiches(onRetour = { ecran = Ecran.FICHES_CHOIX })
                     Ecran.FICHES_PAYS -> EcranFichesPays(onRetour = { ecran = Ecran.FICHES_CHOIX })
                     Ecran.FICHES_ETATS -> EcranFichesEtats()
+                    Ecran.FICHES_ELEMENTS -> EcranFichesElem()
                 }
             }
         }
@@ -1132,7 +1136,7 @@ fun CarteFrance(
  * Dessine la carte. Les épaisseurs de trait (en pixels écran) sont divisées par k :
  * le trait garde la même taille à l'écran quel que soit le zoom.
  */
-private fun DrawScope.dessinerCarte(
+fun DrawScope.dessinerCarte(
     geo: CarteGeo,
     k: Float,
     tx: Float,

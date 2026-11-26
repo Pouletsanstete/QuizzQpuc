@@ -173,6 +173,49 @@ fun lirePartieEtats(ctx: Context, tous: List<Etat>): PartieEtats? {
     }
 }
 
+// ---------------------------------------------------------------- tableau périodique
+
+data class PartieElem(val questions: List<QuestionElem>, val index: Int, val reponses: List<Boolean>)
+
+fun sauverPartieElem(ctx: Context, questions: List<QuestionElem>, index: Int, reponses: List<Boolean>) {
+    val q = JSONArray()
+    questions.forEach { x ->
+        q.put(
+            JSONObject()
+                .put("z", x.element.z)
+                .put("t", x.type.name)
+                .put("m", versJsonTextes(x.champs.map { it.name }))
+        )
+    }
+    val o = JSONObject().put("q", q).put("i", index).put("r", versJson(reponses))
+    Sauvegarde.ecrire(ctx, "elements", o.toString())
+}
+
+fun effacerPartieElem(ctx: Context) = Sauvegarde.ecrire(ctx, "elements", null)
+
+fun lirePartieElem(ctx: Context, tous: List<Element>): PartieElem? {
+    try {
+        val s = Sauvegarde.lire(ctx, "elements") ?: return null
+        val o = JSONObject(s)
+        val q = o.getJSONArray("q")
+        val r = o.getJSONArray("r")
+        val questions = List(q.length()) { i ->
+            val e = q.getJSONObject(i)
+            val m = e.getJSONArray("m")
+            QuestionElem(
+                tous.first { it.z == e.getInt("z") },
+                TypeElem.valueOf(e.getString("t")),
+                List(m.length()) { ModeElem.valueOf(m.getString(it)) }
+            )
+        }
+        val index = o.getInt("i")
+        if (questions.isEmpty() || index !in questions.indices) return null
+        return PartieElem(questions, index, List(r.length()) { r.getBoolean(it) })
+    } catch (e: Exception) {
+        return null
+    }
+}
+
 // ---------------------------------------------------------------- interface
 
 @Composable
