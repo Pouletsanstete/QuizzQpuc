@@ -716,6 +716,7 @@ fun EcranFichesElem() {
                     TableauMini(e.symbole)
                 }
             }
+            BlocFaits("faits_elements.json", e.z.toString())
             PiedFiche(onAleatoire = { ouvert = tous.random() })
         }
     } else {
