@@ -1365,6 +1365,7 @@ fun EcranFiches(onRetour: () -> Unit) {
                     CarteFranceMini(d.numero)
                 }
             }
+            BlocFaits("faits_depts.json", d.numero)
             PiedFiche(onAleatoire = { deptOuvert = DEPARTEMENTS.random() })
         }
     } else {

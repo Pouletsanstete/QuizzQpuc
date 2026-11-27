@@ -624,6 +624,8 @@ fun EcranFichesEtats() {
                     Text("Abréviation : ${e.code}", fontSize = 15.sp)
                     Text("Capitale : ${e.capitale}", fontSize = 15.sp)
                     Text("Surnom : ${valeurEtat(e, ModeEtat.SURNOM)}", fontSize = 15.sp)
+                    val villes = remember(e.code) { FaitsCache.villes(ctx, "faits_etats.json", e.code) }
+                    if (villes.isNotEmpty()) Text("Plus grandes villes : ${villes.joinToString(", ")}", fontSize = 15.sp)
                     Spacer(Modifier.height(8.dp))
                     listOf(ModeEtat.NFL, ModeEtat.MLB, ModeEtat.NBA, ModeEtat.NHL).forEach {
                         Text("${it.nom} : ${valeurEtat(e, it)}", fontSize = 15.sp)
@@ -633,6 +635,7 @@ fun EcranFichesEtats() {
                     CarteRegionMini(CARTE_USA, e.code, noms, "Capitale")
                 }
             }
+            BlocFaits("faits_etats.json", e.code)
             PiedFiche(onAleatoire = { ouvert = tous.random() })
         }
     } else {
